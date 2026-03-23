@@ -1,0 +1,28 @@
+# VivekAI_App v3.0 — Windows + macOS
+# Install: pip install -r requirements.txt
+
+# Audio
+pyaudio==0.2.14
+noisereduce==3.0.2
+soundfile==0.12.1
+
+# Speech-to-Text
+openai-whisper==20231117
+
+# AI APIs
+groq==0.9.0
+google-generativeai==0.7.2
+requests==2.31.0
+
+# UI — works on Windows + macOS
+PyQt5==5.15.10
+pyperclip==1.8.2
+
+# Screen Vision + OCR
+pillow==10.3.0
+pytesseract==0.3.10
+opencv-python==4.9.0.80
+numpy==1.26.4
+
+# Utils
+python-dotenv==1.0.0
