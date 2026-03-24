@@ -3,11 +3,12 @@ VivekAI_App - Audio Capture
 Captures microphone and system audio
 """
 
-import pyaudio
-import numpy as np
+import pyaudio  # type: ignore
+import numpy as np  # type: ignore
 import threading
 import queue
-import config
+import config  # type: ignore
+from typing import Optional
 
 class AudioCapture:
     def __init__(self, callback):
@@ -20,17 +21,11 @@ class AudioCapture:
         self.chunk_size = 1024
         self.sample_rate = config.AUDIO_SAMPLE_RATE
         self.chunk_seconds = config.AUDIO_CHUNK_SECONDS
+        self.processor_thread: Optional[threading.Thread] = None
 
     def _get_input_device(self):
-        """Get best available input device"""
-        device_index = None
-        for i in range(self.audio.get_device_count()):
-            dev = self.audio.get_device_info_by_index(i)
-            # Prefer VB-Audio Virtual Cable for system audio
-            if 'CABLE' in dev['name'].upper() or 'VB-AUDIO' in dev['name'].upper():
-                device_index = i
-                break
-        return device_index  # None = default mic
+        """Get best available input device - default to system mic for reliability"""
+        return None  # Use default system microphone
 
     def start(self):
         self.running = True
@@ -44,10 +39,11 @@ class AudioCapture:
             frames_per_buffer=self.chunk_size,
             stream_callback=self._audio_callback
         )
-        self.stream.start_stream()
+        if self.stream:
+            self.stream.start_stream()  # type: ignore
         # Start buffer processor
         self.processor_thread = threading.Thread(target=self._process_buffer, daemon=True)
-        self.processor_thread.start()
+        self.processor_thread.start()  # type: ignore
 
     def _audio_callback(self, in_data, frame_count, time_info, status):
         audio_data = np.frombuffer(in_data, dtype=np.float32)
@@ -60,8 +56,8 @@ class AudioCapture:
         while self.running:
             with self.buffer_lock:
                 if len(self.buffer) >= frames_needed:
-                    chunk = np.concatenate(self.buffer[:frames_needed])
-                    self.buffer = self.buffer[frames_needed:]
+                    chunk = np.concatenate(self.buffer[:frames_needed])  # type: ignore
+                    self.buffer = self.buffer[frames_needed:]  # type: ignore
                     # Check if there's actual sound (VAD)
                     if self._has_voice(chunk):
                         self.callback(chunk, self.sample_rate)
@@ -75,9 +71,9 @@ class AudioCapture:
     def stop(self):
         self.running = False
         if self.stream:
-            self.stream.stop_stream()
-            self.stream.close()
-        self.audio.terminate()
+            self.stream.stop_stream()  # type: ignore
+            self.stream.close()  # type: ignore
+        self.audio.terminate()  # type: ignore
 
     def get_device_list(self):
         """Return list of available input devices"""

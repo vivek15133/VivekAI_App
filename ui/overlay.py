@@ -703,6 +703,9 @@ class VivekAIOverlay(QWidget):
 
     def _on_transcript(self, text):
         self.heard_text.setPlainText(text)
+        # Propagate to Resume tab Quick Ask
+        if hasattr(self, 'quick_question'):
+            self.quick_question.setPlainText(text)
         self.status_label.setText("⚡ Generating response...")
 
     def _on_mic_response(self, response, engine, elapsed):
