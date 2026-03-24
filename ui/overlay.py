@@ -200,9 +200,29 @@ class VivekAIOverlay(QWidget):
         layout = QVBoxLayout(self.container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        
+        # 1. Top bar
         layout.addWidget(self._build_titlebar())
         layout.addWidget(self._build_controls())
-        layout.addWidget(self._build_tabs(), 1)
+
+        # 2. Side-by-side BODY
+        body_frame = QFrame()
+        body_layout = QHBoxLayout(body_frame)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(0)
+
+        # Left Column (Tabs)
+        self.tabs = self._build_tabs()
+        self.tabs.setFixedWidth(320)
+        body_layout.addWidget(self.tabs)
+
+        # Right Column (Global Response)
+        self.right_panel = self._build_right_panel()
+        body_layout.addWidget(self.right_panel, 1)
+
+        layout.addWidget(body_frame, 1)
+
+        # 3. Bottom bar
         layout.addWidget(self._build_statusbar())
 
     def _build_titlebar(self):
@@ -344,17 +364,12 @@ class VivekAIOverlay(QWidget):
         v.addWidget(self._slabel("🎙  HEARD", "#00E5FF"))
         self.heard_text = QTextEdit()
         self.heard_text.setReadOnly(True)
-        self.heard_text.setFixedHeight(72)
+        self.heard_text.setFixedHeight(120)
         self.heard_text.setObjectName("heardBox")
         self.heard_text.setPlaceholderText("Listening for audio...")
         v.addWidget(self.heard_text)
-        v.addWidget(self._slabel("🤖  AI RESPONSE", "#69FF47"))
-        self.mic_response = QTextEdit()
-        self.mic_response.setReadOnly(True)
-        self.mic_response.setObjectName("responseBox")
-        self.mic_response.setPlaceholderText("AI answer appears here...")
-        v.addWidget(self.mic_response, 1)
-        v.addLayout(self._action_btns(self.mic_response, self.heard_text))
+        
+        v.addStretch()
         return w
 
     # ── Screenshot tab ────────────────────────────────────────────────────────
@@ -382,20 +397,15 @@ class VivekAIOverlay(QWidget):
         delay_row.addWidget(delay_lbl); delay_row.addWidget(self.delay_combo)
         delay_row.addStretch()
         v.addWidget(self.screenshot_btn); v.addLayout(delay_row)
-        v.addWidget(self._slabel("👁  TEXT DETECTED ON SCREEN", "#FFD700"))
+        v.addWidget(self._slabel("👁  SCREEN TEXT", "#FFD700"))
         self.ocr_text = QTextEdit()
         self.ocr_text.setReadOnly(True)
-        self.ocr_text.setFixedHeight(72)
+        self.ocr_text.setFixedHeight(120)
         self.ocr_text.setObjectName("heardBox")
-        self.ocr_text.setPlaceholderText("Text extracted from screen appears here...")
+        self.ocr_text.setPlaceholderText("Extracted text...")
         v.addWidget(self.ocr_text)
-        v.addWidget(self._slabel("🤖  AI RESPONSE", "#69FF47"))
-        self.screenshot_response = QTextEdit()
-        self.screenshot_response.setReadOnly(True)
-        self.screenshot_response.setObjectName("responseBox")
-        self.screenshot_response.setPlaceholderText("AI answer appears here after screenshot...")
-        v.addWidget(self.screenshot_response, 1)
-        v.addLayout(self._action_btns(self.screenshot_response))
+
+        v.addStretch()
         return w
 
     # ── Auto-watch tab ────────────────────────────────────────────────────────
@@ -452,23 +462,16 @@ class VivekAIOverlay(QWidget):
         int_row.addStretch()
         v.addLayout(int_row)
 
+        # Detected content (reduced height in input side)
         v.addWidget(self._slabel("👁  DETECTED ON SCREEN", "#FFD700"))
         self.watch_detected = QTextEdit()
         self.watch_detected.setReadOnly(True)
-        self.watch_detected.setFixedHeight(72)
+        self.watch_detected.setFixedHeight(120)
         self.watch_detected.setObjectName("heardBox")
-        self.watch_detected.setPlaceholderText("Screen text appears here automatically...")
+        self.watch_detected.setPlaceholderText("Screen text appears here...")
         v.addWidget(self.watch_detected)
 
-        v.addWidget(self._slabel("🤖  AUTO AI RESPONSE", "#69FF47"))
-        self.watch_response = QTextEdit()
-        self.watch_response.setReadOnly(True)
-        self.watch_response.setObjectName("responseBox")
-        self.watch_response.setPlaceholderText(
-            "AI answers automatically when new content detected..."
-        )
-        v.addWidget(self.watch_response, 1)
-        v.addLayout(self._action_btns(self.watch_response))
+        v.addStretch()
         return w
 
     # ── Resume tab ────────────────────────────────────────────────────────────
@@ -535,40 +538,79 @@ class VivekAIOverlay(QWidget):
 
         # Quick-ask row
         v.addWidget(self._slabel("💬  QUICK ASK (TEST YOUR CONTEXT)", "#69FF47"))
+        # Quick-ask inputs
         quick_row = QHBoxLayout(); quick_row.setSpacing(6)
         self.quick_question = QTextEdit()
         self.quick_question.setObjectName("heardBox")
-        self.quick_question.setFixedHeight(56)
-        self.quick_question.setPlaceholderText(
-            "Type a test question e.g. 'Tell me about yourself'…"
-        )
+        self.quick_question.setFixedHeight(60)
+        self.quick_question.setPlaceholderText("Ask about your resume...")
+        
         self.quick_ask_btn = QPushButton("Ask")
         self.quick_ask_btn.setObjectName("copyBtn")
-        self.quick_ask_btn.setFixedWidth(50)
-        self.quick_ask_btn.setFixedHeight(56)
-        self.quick_ask_btn.setCursor(Qt.PointingHandCursor)
+        self.quick_ask_btn.setFixedSize(50, 28)
         self.quick_ask_btn.clicked.connect(self._quick_ask)
 
         self.clear_quick_btn = QPushButton("🗑")
         self.clear_quick_btn.setObjectName("clearBtn")
-        self.clear_quick_btn.setFixedWidth(40)
-        self.clear_quick_btn.setFixedHeight(56)
-        self.clear_quick_btn.setCursor(Qt.PointingHandCursor)
+        self.clear_quick_btn.setFixedSize(50, 28)
         self.clear_quick_btn.clicked.connect(self.quick_question.clear)
 
-        quick_row.addWidget(self.quick_question, 1)
-        quick_row.addWidget(self.quick_ask_btn)
-        quick_row.addWidget(self.clear_quick_btn)
-        v.addLayout(quick_row)
+        btns = QVBoxLayout(); btns.setSpacing(4)
+        btns.addWidget(self.quick_ask_btn)
+        btns.addWidget(self.clear_quick_btn)
 
-        self.quick_response = QTextEdit()
-        self.quick_response.setReadOnly(True)
-        self.quick_response.setObjectName("responseBox")
-        self.quick_response.setFixedHeight(90)
-        self.quick_response.setPlaceholderText("Answer appears here…")
-        v.addWidget(self.quick_response)
+        quick_row.addWidget(self.quick_question, 1)
+        quick_row.addLayout(btns)
+        v.addLayout(quick_row)
+        
+        v.addStretch()
+        return w
+
+    def _build_right_panel(self):
+        w = QFrame()
+        w.setObjectName("rightPanel")
+        v = QVBoxLayout(w); v.setContentsMargins(10, 10, 10, 10); v.setSpacing(8)
+
+        v.addWidget(self._slabel("🤖  AI RESPONSE", "#69FF47"))
+        
+        # Shared Response Box
+        self.global_response = QTextEdit()
+        self.global_response.setReadOnly(True)
+        self.global_response.setObjectName("responseBox")
+        self.global_response.setPlaceholderText("Everything the AI says will appear here permanently...")
+        v.addWidget(self.global_response, 1)
+
+        # Action Buttons
+        row = QHBoxLayout(); row.setSpacing(8)
+        
+        copy_btn = QPushButton("📋  Copy")
+        copy_btn.setObjectName("copyBtn")
+        copy_btn.setCursor(Qt.PointingHandCursor)
+        copy_btn.clicked.connect(lambda: self._copy(self.global_response))
+        
+        clear_btn = QPushButton("🗑  Clear All")
+        clear_btn.setObjectName("clearBtn")
+        clear_btn.setCursor(Qt.PointingHandCursor)
+        clear_btn.clicked.connect(self._clear_everything)
+        
+        export_btn = QPushButton("📁  History")
+        export_btn.setObjectName("clearBtn")
+        export_btn.setCursor(Qt.PointingHandCursor)
+        export_btn.clicked.connect(self._open_transcripts)
+        
+        row.addWidget(copy_btn); row.addWidget(clear_btn); row.addWidget(export_btn)
+        v.addLayout(row)
 
         return w
+
+    def _clear_everything(self):
+        self.global_response.clear()
+        # Also clear inputs if visible
+        if hasattr(self, 'heard_text'): self.heard_text.clear()
+        if hasattr(self, 'quick_question'): self.quick_question.clear()
+        self.transcript_mgr.clear_session()
+        self.status_label.setText("✨ Ready")
+        self.count_label.setText("0 answers")
 
     # ── Status bar ────────────────────────────────────────────────────────────
 
@@ -725,7 +767,7 @@ class VivekAIOverlay(QWidget):
         self.status_label.setText("⚡ Generating response...")
 
     def _on_mic_response(self, response, engine, elapsed):
-        self.mic_response.setPlainText(response)
+        self.global_response.setPlainText(response)
         self.transcript_mgr.add_entry(
             self.heard_text.toPlainText(), response
         )
@@ -788,8 +830,7 @@ class VivekAIOverlay(QWidget):
         self.watch_detected.setPlainText(short)
 
     def _on_vision_response(self, response, engine, elapsed):
-        self.screenshot_response.setPlainText(response)
-        self.watch_response.setPlainText(response)
+        self.global_response.setPlainText(response)
         self.transcript_mgr.add_entry("[Screen]", response)
         self.count_label.setText(
             f"{self.transcript_mgr.get_entry_count()} answers"
@@ -950,7 +991,7 @@ class VivekAIOverlay(QWidget):
         quick_signals = WorkerSignals()
         quick_signals.response_ready.connect(
             lambda r, e, t: (
-                self.quick_response.setPlainText(r),
+                self.global_response.setPlainText(r),
                 self.status_label.setText(f"{'❌' if e == 'ERROR' else '✅'} {e} | {t}s"),
             )
         )
