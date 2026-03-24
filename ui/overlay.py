@@ -171,6 +171,10 @@ class VivekAIOverlay(QWidget):
         self._build_ui()
         self._connect_signals()
         self._load_whisper_async()
+        
+        # Open to Resume tab by default
+        if hasattr(self, 'tabs'):
+            self.tabs.setCurrentIndex(3)
 
     # ── Window setup ─────────────────────────────────────────────────────────
 
@@ -179,11 +183,11 @@ class VivekAIOverlay(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_NoSystemBackground)
         self.setWindowOpacity(config.WINDOW_OPACITY)
-        self.setMinimumSize(320, 420)
-        self.resize(390, 620)
+        self.setMinimumSize(600, 450)
+        self.resize(700, 500)
         self.setMouseTracking(True)
         screen = QApplication.primaryScreen().geometry()
-        self.move(screen.width() - 410, 40)
+        self.move(screen.width() - 720, 100)
         # Apply screen-capture exclusion AFTER window is created
         QTimer.singleShot(600, lambda: apply_screen_capture_exclusion(self))
 
@@ -191,39 +195,70 @@ class VivekAIOverlay(QWidget):
 
     def _build_ui(self):
         self.container = QFrame(self)
-        self.container.setGeometry(0, 0, self.width(), self.height())
         self.container.setObjectName("container")
         self.container.setStyleSheet(self._stylesheet())
         self.container.setMouseTracking(True)
         self.container.installEventFilter(self)
 
-        layout = QVBoxLayout(self.container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        main_vbox = QVBoxLayout(self.container)
+        main_vbox.setContentsMargins(0, 0, 0, 0)
+        main_vbox.setSpacing(0)
         
-        # 1. Top bar
-        layout.addWidget(self._build_titlebar())
-        layout.addWidget(self._build_controls())
+        # 1. Top bar (Fixed Height)
+        self.title_bar_widget = self._build_titlebar()
+        main_vbox.addWidget(self.title_bar_widget)
+        
+        self.controls_widget = self._build_controls()
+        main_vbox.addWidget(self.controls_widget)
 
-        # 2. Side-by-side BODY
+        # 2. Split Body (Horizontal)
         body_frame = QFrame()
-        body_layout = QHBoxLayout(body_frame)
-        body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(0)
+        body_hbox = QHBoxLayout(body_frame)
+        body_hbox.setContentsMargins(10, 0, 10, 10)
+        body_hbox.setSpacing(12)
 
-        # Left Column (Tabs)
+        # -- Left Column: Inputs (Scrollable)
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QFrame.NoFrame)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
         self.tabs = self._build_tabs()
-        self.tabs.setFixedWidth(320)
-        body_layout.addWidget(self.tabs)
+        left_scroll.setWidget(self.tabs)
+        body_hbox.addWidget(left_scroll, 4) # Stretch 4
 
-        # Right Column (Global Response)
+        # -- Right Column: Persistent AI Response (Scrollable)
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setFrameShape(QFrame.NoFrame)
+        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
         self.right_panel = self._build_right_panel()
-        body_layout.addWidget(self.right_panel, 1)
+        right_scroll.setWidget(self.right_panel)
+        body_hbox.addWidget(right_scroll, 5) # Stretch 5
 
-        layout.addWidget(body_frame, 1)
+        main_vbox.addWidget(body_frame, 1)
 
-        # 3. Bottom bar
-        layout.addWidget(self._build_statusbar())
+        # 3. Bottom bar (Fixed Height)
+        main_vbox.addWidget(self._build_statusbar())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.container.setGeometry(0, 0, self.width(), self.height())
+        self._update_dynamic_fonts()
+
+    def _update_dynamic_fonts(self):
+        # Scale base font from window size
+        # 700 width is our "baseline" for 100% font size
+        scale = max(0.8, min(1.5, self.width() / 750.0))
+        base_size = int(12 * scale)
+        small_size = int(10 * scale)
+        large_size = int(15 * scale)
+        
+        # We can update the stylesheet dynamically or update specific labels
+        # For simplicity and performance, we'll update the container's stylesheet
+        # and re-apply it.
+        self.container.setStyleSheet(self._stylesheet(base_size, small_size, large_size))
 
     def _build_titlebar(self):
         self.titleBar = QFrame()
@@ -613,6 +648,78 @@ class VivekAIOverlay(QWidget):
         self.count_label.setText("0 answers")
 
     # ── Status bar ────────────────────────────────────────────────────────────
+
+    # ── Stylesheet ──────────────────────────────────────────────────────────
+
+    def _stylesheet(self, base=12, small=10, large=15):
+        # We now accept sizes for dynamic scaling
+        accent = "#00E5FF" if self.platform == "windows" else "#A855F7"
+        return f"""
+            #container {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
+                            stop:0 #0F172A, stop:1 #1E293B);
+                border: 1px solid rgba(0, 229, 255, 0.2);
+                border-radius: 12px;
+            }}
+            #titleBar {{
+                background: rgba(15, 23, 42, 0.4);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+            }}
+            #controls {{
+                background: rgba(15, 23, 42, 0.2);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            }}
+            #statusBar {{
+                background: rgba(15, 23, 42, 0.6);
+                border-top: 1px solid rgba(255, 255, 255, 0.05);
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+            }}
+            QTabWidget::pane {{ border: none; top: -1px; background: transparent; }}
+            QTabBar::tab {{
+                background: transparent; color: #94A3B8; padding: 10px 14px;
+                font-family: 'Segoe UI'; font-size: {small}px; font-weight: 600;
+            }}
+            QTabBar::tab:selected {{ color: {accent}; border-bottom: 2px solid {accent}; }}
+            
+            QTextEdit {{
+                background: rgba(0, 0, 0, 0.2); color: #E2E8F0;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 8px; padding: 10px;
+                font-family: 'Consolas', 'Monaco', monospace; font-size: {base}px;
+            }}
+            #responseBox {{
+                background: rgba(10, 10, 10, 0.3);
+                border: 2px solid rgba(105, 255, 71, 0.15);
+                font-size: {base}px; line-height: 1.4;
+            }}
+            
+            QPushButton {{
+                background: rgba(255, 255, 255, 0.05); color: #F1F5F9;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 6px; font-family: 'Segoe UI'; font-size: {small}px; font-weight: 600;
+            }}
+            QPushButton:hover {{ background: rgba(255, 255, 255, 0.1); }}
+            #listenBtn[active="true"] {{ background: #EF4444; border: 1px solid #F87171; }}
+            
+            #copyBtn {{ background: rgba(105, 255, 71, 0.1); color: #69FF47; border: 1px solid rgba(105, 255, 71, 0.2); }}
+            #clearBtn {{ background: rgba(239, 68, 68, 0.1); color: #F87171; border: 1px solid rgba(239, 68, 68, 0.2); }}
+            
+            QComboBox {{
+                background: rgba(255, 255, 255, 0.05); color: #94A3B8;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 6px; padding: 4px 10px; font-size: {small}px;
+            }}
+            
+            QScrollBar:vertical {{
+                background: transparent; width: 6px; margin: 0px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: rgba(255, 255, 255, 0.15); border-radius: 3px;
+            }}
+        """
 
     def _build_statusbar(self):
         bar = QFrame(); bar.setFixedHeight(28); bar.setObjectName("statusBar")
@@ -1142,11 +1249,6 @@ class VivekAIOverlay(QWidget):
         self._resize_start_pos  = None
         self._drag_pos          = None
 
-    def resizeEvent(self, e):
-        if hasattr(self, "container"):
-            self.container.setGeometry(0, 0, self.width(), self.height())
-        super().resizeEvent(e)
-
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -1158,119 +1260,3 @@ class VivekAIOverlay(QWidget):
         if self.is_listening: self._stop_listening()
         if self.is_watching:  self._stop_watching()
         e.accept()
-
-    # ── Stylesheet ────────────────────────────────────────────────────────────
-
-    def _stylesheet(self):
-        return """
-        #container {
-            background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                stop:0 rgba(12,14,22,0.97), stop:1 rgba(8,10,18,0.97));
-            border-radius:14px; border:1px solid rgba(0,229,255,0.18);
-        }
-        #titleBar {
-            background:rgba(0,229,255,0.05);
-            border-bottom:1px solid rgba(0,229,255,0.12);
-            border-top-left-radius:14px; border-top-right-radius:14px;
-        }
-        #controls {
-            background:rgba(255,255,255,0.02);
-            border-bottom:1px solid rgba(255,255,255,0.05);
-        }
-        #statusBar {
-            background:rgba(0,0,0,0.2);
-            border-top:1px solid rgba(255,255,255,0.05);
-            border-bottom-left-radius:14px; border-bottom-right-radius:14px;
-        }
-        QTabWidget#tabs::pane { border:none; background:transparent; }
-        QTabBar::tab {
-            background:rgba(255,255,255,0.04); color:#888;
-            padding:7px 12px; border:none;
-            font-family:'Segoe UI'; font-size:11px;
-        }
-        QTabBar::tab:selected {
-            background:rgba(0,229,255,0.1); color:#00E5FF;
-            border-bottom:2px solid #00E5FF;
-        }
-        QTabBar::tab:hover { background:rgba(255,255,255,0.08); color:#CCC; }
-        QComboBox#combo {
-            background:rgba(255,255,255,0.06); color:#E0E0E0;
-            border:1px solid rgba(255,255,255,0.1); border-radius:7px;
-            padding:4px 10px; font-size:12px; font-family:'Segoe UI';
-        }
-        QComboBox QAbstractItemView {
-            background:#0D1117; color:#E0E0E0;
-            selection-background-color:rgba(0,229,255,0.2);
-            border:1px solid rgba(0,229,255,0.2); border-radius:6px;
-        }
-        QPushButton#listenBtn {
-            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                stop:0 #00B4DB, stop:1 #0083B0);
-            color:white; border:none; border-radius:7px;
-            padding:5px 12px; font-size:11px; font-weight:600;
-            font-family:'Segoe UI';
-        }
-        QPushButton#listenBtn[active="true"] {
-            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                stop:0 #FF4E50, stop:1 #F9D423);
-        }
-        QPushButton#screenshotBtn {
-            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                stop:0 #7C3AED, stop:1 #4F46E5);
-            color:white; border:none; border-radius:8px;
-            font-size:13px; font-weight:700; font-family:'Segoe UI';
-        }
-        QPushButton#screenshotBtn:disabled { background:#333; color:#666; }
-        QPushButton#regionBtn {
-            background:rgba(255,215,0,0.1); color:#FFD700;
-            border:1px solid rgba(255,215,0,0.3); border-radius:7px;
-            padding:6px 12px; font-size:11px; font-family:'Segoe UI';
-        }
-        QPushButton#watchBtn {
-            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                stop:0 #059669, stop:1 #10B981);
-            color:white; border:none; border-radius:7px;
-            padding:6px 14px; font-size:11px; font-weight:700;
-            font-family:'Segoe UI';
-        }
-        QPushButton#watchBtn[active="true"] {
-            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                stop:0 #FF4E50, stop:1 #F9D423);
-        }
-        QPushButton#uploadBtn {
-            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                stop:0 #7C3AED, stop:1 #A855F7);
-            color:white; border:none; border-radius:8px;
-            font-size:12px; font-weight:700; font-family:'Segoe UI';
-        }
-        QPushButton#uploadBtn:disabled { background:#333; color:#666; }
-        QPushButton#copyBtn {
-            background:rgba(105,255,71,0.1); color:#69FF47;
-            border:1px solid rgba(105,255,71,0.25); border-radius:7px;
-            padding:5px 12px; font-size:11px; font-family:'Segoe UI';
-        }
-        QPushButton#clearBtn {
-            background:rgba(255,255,255,0.05); color:#888;
-            border:1px solid rgba(255,255,255,0.08); border-radius:7px;
-            padding:5px 12px; font-size:11px; font-family:'Segoe UI';
-        }
-        QTextEdit#heardBox {
-            background:rgba(0,229,255,0.04); color:#B0BEC5;
-            border:1px solid rgba(0,229,255,0.12); border-radius:8px;
-            padding:8px; font-size:12px; font-family:'Segoe UI';
-        }
-        QTextEdit#responseBox {
-            background:rgba(105,255,71,0.04); color:#E8F5E9;
-            border:1px solid rgba(105,255,71,0.15); border-radius:8px;
-            padding:10px; font-size:13px; font-family:'Segoe UI';
-        }
-        QTextEdit#resumeBox {
-            background:rgba(167,139,250,0.04); color:#E9D5FF;
-            border:1px solid rgba(167,139,250,0.15); border-radius:8px;
-            padding:10px; font-size:11px; font-family:'Segoe UI';
-        }
-        QScrollBar:vertical { background:transparent; width:4px; }
-        QScrollBar::handle:vertical {
-            background:rgba(0,229,255,0.3); border-radius:2px;
-        }
-        """
