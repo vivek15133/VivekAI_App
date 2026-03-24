@@ -224,6 +224,8 @@ class VivekAIOverlay(QWidget):
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
         self.tabs = self._build_tabs()
+        self.tabs.tabBar().setExpanding(True)
+        self.tabs.setDocumentMode(True)
         left_scroll.setWidget(self.tabs)
         body_hbox.addWidget(left_scroll, 4) # Stretch 4
 
@@ -250,10 +252,10 @@ class VivekAIOverlay(QWidget):
     def _update_dynamic_fonts(self):
         # Scale base font from window size
         # 700 width is our "baseline" for 100% font size
-        scale = max(0.8, min(1.5, self.width() / 750.0))
-        base_size = int(12 * scale)
-        small_size = int(10 * scale)
-        large_size = int(15 * scale)
+        scale = max(0.9, min(1.6, self.width() / 750.0))
+        base_size = int(13 * scale)
+        small_size = int(11 * scale)
+        large_size = int(16 * scale)
         
         # We can update the stylesheet dynamically or update specific labels
         # For simplicity and performance, we'll update the container's stylesheet
@@ -610,7 +612,7 @@ class VivekAIOverlay(QWidget):
         w.setObjectName("rightPanel")
         v = QVBoxLayout(w); v.setContentsMargins(10, 10, 10, 10); v.setSpacing(8)
 
-        v.addWidget(self._slabel("🤖  AI RESPONSE", "#69FF47"))
+        v.addWidget(self._slabel("🤖  AI RESPONSE", "#00E5FF"))
         
         # Shared Response Box
         self.global_response = QTextEdit()
@@ -661,87 +663,89 @@ class VivekAIOverlay(QWidget):
         accent = "#00E5FF" if self.platform == "windows" else "#A855F7"
         return f"""
             #container {{
-                background: #F1F5F9;
-                border: 1px solid #CBD5E1;
+                background: #111827; 
+                border: 1px solid #374151;
                 border-radius: 12px;
             }}
             #titleBar {{
-                background: #E2E8F0;
-                border-bottom: 1px solid #CBD5E1;
+                background: #1F2937;
+                border-bottom: 1px solid #374151;
                 border-top-left-radius: 12px;
                 border-top-right-radius: 12px;
             }}
             #controls {{
-                background: #F8FAFC;
-                border-bottom: 1px solid #E2E8F0;
+                background: #111827;
+                border-bottom: 1px solid #1F2937;
             }}
             #statusBar {{
-                background: #E2E8F0;
-                border-top: 1px solid #CBD5E1;
+                background: #1F2937;
+                border-top: 1px solid #374151;
                 border-bottom-left-radius: 12px;
                 border-bottom-right-radius: 12px;
             }}
-            QTabWidget::pane {{ border: none; background: #F1F5F9; }}
+            QTabWidget::pane {{ border: none; background: transparent; }}
             QTabBar::tab {{
-                background: #E2E8F0; color: #64748B; padding: 10px 14px;
-                font-family: 'Segoe UI'; font-size: {small}px; font-weight: 600;
-                border-right: 1px solid #CBD5E1;
+                background: #1F2937; color: #9CA3AF; padding: 12px 5px;
+                font-family: 'Segoe UI'; font-size: {small}px; font-weight: 700;
+                border-right: 1px solid #374151;
+                min-width: 60px;
             }}
-            QTabBar::tab:selected {{ background: #F1F5F9; color: {accent}; border-bottom: 2px solid {accent}; }}
-            QTabBar::tab:hover {{ background: #CBD5E1; color: #1E293B; }}
+            QTabBar::tab:selected {{ background: #111827; color: {accent}; border-bottom: 3px solid {accent}; }}
+            QTabBar::tab:hover {{ background: #374151; color: #FFFFFF; }}
             
             QTextEdit {{
-                background: #FFFFFF; color: #1E293B;
-                border: 1px solid #CBD5E1;
+                background: #000000; color: #F9FAFB;
+                border: 1px solid #4B5563;
                 border-radius: 8px; padding: 12px;
                 font-family: 'Consolas', 'Monaco', monospace; font-size: {base}px;
-                line-height: 1.5;
+                line-height: 1.6;
             }}
             #heardBox, #resumeBox {{
-                background: #F8FAFC;
-                color: #334155;
+                background: #0F172A;
+                color: #FFFFFF;
+                border: 1px solid #1E293B;
             }}
             #responseBox {{
-                background: #FFFFFF;
-                color: #0F172A;
+                background: #000000;
+                color: #FFFFFF;
                 border: 2px solid {accent};
-                font-size: {base}px;
+                font-size: {large}px;
             }}
             
-            QLabel {{ color: #334155; font-family: 'Segoe UI'; font-weight: 500; }}
+            QLabel {{ color: #E5E7EB; font-family: 'Segoe UI'; font-weight: 600; }}
             
             QPushButton {{
-                background: #FFFFFF; color: #1E293B;
-                border: 1px solid #CBD5E1;
-                border-radius: 6px; font-family: 'Segoe UI'; font-size: {small}px; font-weight: 600;
+                background: #1F2937; color: #FFFFFF;
+                border: 1px solid #374151;
+                border-radius: 6px; font-family: 'Segoe UI'; font-size: {small}px; font-weight: 700;
             }}
             QPushButton:hover {{ 
-                background: {accent}; color: #FFFFFF; 
+                background: #374151; color: {accent}; 
                 border: 1px solid {accent};
             }}
-            #listenBtn[active="true"] {{ background: #EF4444; color: white; border: 1px solid #DC2626; }}
+            #listenBtn[active="true"] {{ background: #DC2626; color: white; border: 1px solid #EF4444; }}
             
-            #copyBtn {{ background: #F0FDF4; color: #166534; border: 1px solid #BBF7D0; }}
-            #copyBtn:hover {{ background: #166534; color: white; }}
+            #copyBtn {{ background: #064E3B; color: #34D399; border: 1px solid #059669; }}
+            #copyBtn:hover {{ background: #059669; color: white; }}
             
-            #clearBtn {{ background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; }}
-            #clearBtn:hover {{ background: #991B1B; color: white; }}
+            #clearBtn {{ background: #7F1D1D; color: #F87171; border: 1px solid #B91C1C; }}
+            #clearBtn:hover {{ background: #B91C1C; color: white; }}
             
             QComboBox {{
-                background: #FFFFFF; color: #334155;
-                border: 1px solid #CBD5E1;
+                background: #1F2937; color: #F3F4F6;
+                border: 1px solid #374151;
                 border-radius: 6px; padding: 4px 10px; font-size: {small}px;
             }}
             QComboBox:hover {{ border: 1px solid {accent}; }}
             
             QScrollBar:vertical {{
-                background: #F1F5F9; width: 8px; margin: 0px;
+                background: #111827; width: 10px; margin: 0px;
             }}
             QScrollBar::handle:vertical {{
-                background: #CBD5E1; border-radius: 4px;
+                background: #374151; border-radius: 5px; min-height: 20px;
             }}
             QScrollBar::handle:vertical:hover {{
-                background: #94A3B8;
+                background: {accent};
             }}
         """
 
