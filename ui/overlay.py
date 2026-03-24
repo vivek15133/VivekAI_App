@@ -402,6 +402,7 @@ class VivekAIOverlay(QWidget):
         self.heard_text.setFixedHeight(120)
         self.heard_text.setObjectName("heardBox")
         self.heard_text.setPlaceholderText("Listening for audio...")
+        self.heard_text.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         v.addWidget(self.heard_text)
         
         v.addStretch()
@@ -438,6 +439,7 @@ class VivekAIOverlay(QWidget):
         self.ocr_text.setFixedHeight(120)
         self.ocr_text.setObjectName("heardBox")
         self.ocr_text.setPlaceholderText("Extracted text...")
+        self.ocr_text.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         v.addWidget(self.ocr_text)
 
         v.addStretch()
@@ -466,21 +468,21 @@ class VivekAIOverlay(QWidget):
         self.region_label.setWordWrap(True); v.addWidget(self.region_label)
 
         btn_row = QHBoxLayout(); btn_row.setSpacing(6)
-        self.select_region_btn = QPushButton("🖱  Select Region")
+        self.select_region_btn = QPushButton("🖱  Region")
         self.select_region_btn.setObjectName("regionBtn")
         self.select_region_btn.setCursor(Qt.PointingHandCursor)
         self.select_region_btn.clicked.connect(self._select_region)
-        self.fullscreen_btn = QPushButton("🖥  Full Screen")
+        self.fullscreen_btn = QPushButton("🖥  Full")
         self.fullscreen_btn.setObjectName("regionBtn")
         self.fullscreen_btn.setCursor(Qt.PointingHandCursor)
         self.fullscreen_btn.clicked.connect(self._use_fullscreen)
-        self.watch_btn = QPushButton("👁  Start Watching")
+        self.watch_btn = QPushButton("👁  Watch")
         self.watch_btn.setObjectName("watchBtn")
         self.watch_btn.setCursor(Qt.PointingHandCursor)
         self.watch_btn.clicked.connect(self._toggle_watch)
-        btn_row.addWidget(self.select_region_btn)
-        btn_row.addWidget(self.fullscreen_btn)
-        btn_row.addWidget(self.watch_btn)
+        btn_row.addWidget(self.select_region_btn, 1)
+        btn_row.addWidget(self.fullscreen_btn, 1)
+        btn_row.addWidget(self.watch_btn, 1)
         v.addLayout(btn_row)
 
         int_row = QHBoxLayout()
@@ -504,6 +506,7 @@ class VivekAIOverlay(QWidget):
         self.watch_detected.setFixedHeight(120)
         self.watch_detected.setObjectName("heardBox")
         self.watch_detected.setPlaceholderText("Screen text appears here...")
+        self.watch_detected.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         v.addWidget(self.watch_detected)
 
         v.addStretch()
@@ -543,10 +546,10 @@ class VivekAIOverlay(QWidget):
         self.upload_btn.clicked.connect(self._upload_resume)
         self.clear_resume_btn = QPushButton("🗑  Clear")
         self.clear_resume_btn.setObjectName("clearBtn")
-        self.clear_resume_btn.setFixedWidth(70)
         self.clear_resume_btn.setCursor(Qt.PointingHandCursor)
         self.clear_resume_btn.clicked.connect(self._clear_resume)
-        upload_row.addWidget(self.upload_btn); upload_row.addWidget(self.clear_resume_btn)
+        upload_row.addWidget(self.upload_btn, 3)
+        upload_row.addWidget(self.clear_resume_btn, 1)
         v.addLayout(upload_row)
 
         # File label
@@ -579,6 +582,7 @@ class VivekAIOverlay(QWidget):
         self.quick_question.setObjectName("heardBox")
         self.quick_question.setFixedHeight(60)
         self.quick_question.setPlaceholderText("Ask about your resume...")
+        self.quick_question.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
         self.quick_ask_btn = QPushButton("Ask")
         self.quick_ask_btn.setObjectName("copyBtn")
@@ -613,6 +617,7 @@ class VivekAIOverlay(QWidget):
         self.global_response.setReadOnly(True)
         self.global_response.setObjectName("responseBox")
         self.global_response.setPlaceholderText("Everything the AI says will appear here permanently...")
+        self.global_response.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         v.addWidget(self.global_response, 1)
 
         # Action Buttons
@@ -685,20 +690,28 @@ class VivekAIOverlay(QWidget):
             QTabBar::tab:selected {{ color: {accent}; border-bottom: 2px solid {accent}; }}
             
             QTextEdit {{
-                background: rgba(0, 0, 0, 0.2); color: #E2E8F0;
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: 8px; padding: 10px;
+                background: rgba(15, 23, 42, 0.95); color: #FFFFFF;
+                border: 1px solid rgba(0, 229, 255, 0.4);
+                border-radius: 8px; padding: 12px;
                 font-family: 'Consolas', 'Monaco', monospace; font-size: {base}px;
+                line-height: 1.5;
+            }}
+            #heardBox, #resumeBox {{
+                background: rgba(10, 10, 10, 0.5);
+                color: #FFFFFF;
             }}
             #responseBox {{
-                background: rgba(10, 10, 10, 0.3);
-                border: 2px solid rgba(105, 255, 71, 0.15);
-                font-size: {base}px; line-height: 1.4;
+                background: #000000;
+                color: #FFFFFF;
+                border: 2px solid rgba(105, 255, 71, 0.6);
+                font-size: {base}px;
             }}
             
+            QLabel {{ color: #F1F5F9; font-family: 'Segoe UI'; }}
+            
             QPushButton {{
-                background: rgba(255, 255, 255, 0.05); color: #F1F5F9;
-                border: 1px solid rgba(255, 255, 255, 0.1);
+                background: rgba(30, 41, 59, 0.8); color: #FFFFFF;
+                border: 1px solid rgba(255, 255, 255, 0.2);
                 border-radius: 6px; font-family: 'Segoe UI'; font-size: {small}px; font-weight: 600;
             }}
             QPushButton:hover {{ background: rgba(255, 255, 255, 0.1); }}
@@ -736,8 +749,9 @@ class VivekAIOverlay(QWidget):
     def _slabel(self, text, color):
         lbl = QLabel(text)
         lbl.setStyleSheet(
-            f"color:{color};font-size:9px;font-weight:700;"
-            "letter-spacing:1.5px;font-family:'Segoe UI';"
+            f"color:{color};font-size:10px;font-weight:800;"
+            "letter-spacing:1.8px;font-family:'Segoe UI';"
+            "background: transparent;"
         )
         return lbl
 
