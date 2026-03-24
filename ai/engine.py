@@ -47,7 +47,7 @@ class AIEngine:
                 print(f"[{engine_name}] failed: {e}, trying next...")
                 continue
 
-        return "Sorry, all AI engines are unavailable right now.", "NONE", 0
+        return "Sorry, all AI engines are unavailable right now.", "NONE", 0.0
 
     def _call_engine(self, engine_name, prompt, system_prompt):
         if engine_name == "groq":

@@ -1,23 +1,33 @@
 """
-VivekAI_App - Overlay UI v3.0
+VivekAI_App - Overlay UI v3.1
+FIXES:
+  • RegionSelector & overlay are now INVISIBLE to screen share / OBS
+  • Resize-handle cursors hidden from screen capture (only you see them)
+  • Window resize arrows suppressed on screen share target
+  • Resume upload tab — auto-builds AI context from PDF/DOCX/TXT
 Supports: Windows 10/11 + macOS 12+
 """
 
 import sys
+import os
 import threading
 import pyperclip  # type: ignore
 from datetime import datetime
 from PyQt5.QtWidgets import (  # type: ignore
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QComboBox, QTextEdit, QApplication,
-    QFrame, QTabWidget, QMenu, QAction, QSizeGrip
+    QFrame, QTabWidget, QMenu, QAction, QFileDialog,
+    QScrollArea
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread, QPoint, QRect, QSize, QEvent  # type: ignore
+from PyQt5.QtCore import (  # type: ignore
+    Qt, QTimer, pyqtSignal, QObject, QThread,
+    QPoint, QRect, QSize, QEvent
+)
 from PyQt5.QtGui import QColor, QFont, QPainter, QBrush, QPen, QCursor  # type: ignore
 from typing import Optional, Tuple, Any
 
 # Pixel zone near each edge that acts as a resize handle
-RESIZE_MARGIN = 8
+RESIZE_MARGIN = 16
 
 import config  # type: ignore
 from modes.prompts import get_mode_list, get_mode_icon, get_system_prompt  # type: ignore
@@ -33,6 +43,20 @@ from ui.platform_utils import (  # type: ignore
     open_folder, get_window_flags_for_platform, is_macos
 )
 
+# ── Resume parser (graceful import) ──────────────────────────────────────────
+try:
+    from ai.resume_parser import (  # type: ignore
+        extract_text_from_file, parse_resume,
+        build_resume_context, get_resume_enhanced_prompt
+    )
+    RESUME_AVAILABLE = True
+except ImportError:
+    RESUME_AVAILABLE = False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Worker signals & threads
+# ─────────────────────────────────────────────────────────────────────────────
 
 class WorkerSignals(QObject):
     transcript_ready  = pyqtSignal(str)
@@ -46,38 +70,70 @@ class WorkerSignals(QObject):
 class AIWorker(QThread):
     def __init__(self, text, system_prompt, engine, signals):
         super().__init__()
-        self.text = text
+        self.text          = text
         self.system_prompt = system_prompt
-        self.engine = engine
-        self.signals = signals
+        self.engine        = engine
+        self.signals       = signals
 
     def run(self):
         import time
         try:
-            response, eng, elapsed = self.engine.generate(self.text, self.system_prompt)
+            response, eng, elapsed = self.engine.generate(
+                self.text, self.system_prompt
+            )
             self.signals.response_ready.emit(response, eng, elapsed)
         except Exception as e:
-            self.signals.response_ready.emit(f"Error: {e}", "ERROR", 0)
+            self.signals.response_ready.emit(f"Error: {e}", "ERROR", 0.0)
 
 
 class VisionWorker(QThread):
     def __init__(self, screenshot, mode, vision_client, signals):
         super().__init__()
-        self.screenshot = screenshot
-        self.mode = mode
+        self.screenshot    = screenshot
+        self.mode          = mode
         self.vision_client = vision_client
-        self.signals = signals
+        self.signals       = signals
 
     def run(self):
         import time
         try:
-            start = time.time()
-            response = self.vision_client.analyze_screenshot(self.screenshot, self.mode)
+            start    = time.time()
+            response = self.vision_client.analyze_screenshot(
+                self.screenshot, self.mode
+            )
             elapsed = round(time.time() - start, 2)  # type: ignore
             self.signals.vision_ready.emit(response, "GEMINI VISION", elapsed)
         except Exception as e:
-            self.signals.vision_ready.emit(f"Vision error: {e}", "ERROR", 0)
+            self.signals.vision_ready.emit(f"Vision error: {e}", "ERROR", 0.0)
 
+
+class ResumeParseWorker(QThread):
+    """Parse a resume file in a background thread."""
+    parse_done = pyqtSignal(str, str)   # (status_msg, context_text)
+
+    def __init__(self, filepath):
+        super().__init__()
+        self.filepath = filepath
+
+    def run(self):
+        try:
+            raw     = extract_text_from_file(self.filepath)
+            parsed  = parse_resume(raw)
+            context = build_resume_context(parsed)
+            name    = parsed.get("name", "Candidate")
+            skills  = parsed.get("skills", [])
+            msg     = (
+                f"✅ Resume loaded — {name} | "
+                f"{len(skills)} skills detected"
+            )
+            self.parse_done.emit(msg, context)
+        except Exception as e:
+            self.parse_done.emit(f"❌ Resume parse error: {e}", "")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main overlay widget
+# ─────────────────────────────────────────────────────────────────────────────
 
 class VivekAIOverlay(QWidget):
     trigger_auto_watch = pyqtSignal(str)
@@ -90,104 +146,120 @@ class VivekAIOverlay(QWidget):
         self.vision_client  = VisionAIClient()
         self.transcriber    = Transcriber()
         self.transcript_mgr = TranscriptManager()
-        self.screen_vision  = ScreenVision(on_text_detected=self._on_screen_text_detected)
+        self.screen_vision  = ScreenVision(
+            on_text_detected=self._on_screen_text_detected
+        )
         self.audio_capture: Any = None
         self.is_listening   = False
         self.is_watching    = False
         self.watch_region: Optional[Tuple[int, int, int, int]] = None
         self.workers        = []
-        # --- drag/resize state ---
-        self._drag_pos: Optional[QPoint] = None          # for title-bar drag
-        self._resize_dir: Optional[str] = None          # active resize direction
-        self._resize_start_geom: Optional[QRect] = None      # window geom at resize start
-        self._resize_start_pos: Optional[QPoint]  = None      # global mouse pos at resize start
-        self._is_minimized  = False
-        self._normal_height = 560
+
+        # Resume context
+        self.resume_context: str = ""
+        self._resume_worker: Optional[ResumeParseWorker] = None
+
+        # Drag / resize state
+        self._drag_pos: Optional[QPoint]  = None
+        self._resize_dir: Optional[str]   = None
+        self._resize_start_geom: Optional[QRect]  = None
+        self._resize_start_pos:  Optional[QPoint] = None
+        self._is_minimized   = False
+        self._normal_height  = 600
+
         self._setup_window()
         self._build_ui()
         self._connect_signals()
         self._load_whisper_async()
+
+    # ── Window setup ─────────────────────────────────────────────────────────
 
     def _setup_window(self):
         self.setWindowFlags(get_window_flags_for_platform())
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_NoSystemBackground)
         self.setWindowOpacity(config.WINDOW_OPACITY)
-        # Allow free resize — set only a minimum so UI stays usable
-        self.setMinimumSize(300, 380)
-        self.resize(380, 560)
-        # Mouse tracking required so cursor updates fire even without button held
+        self.setMinimumSize(320, 420)
+        self.resize(390, 620)
         self.setMouseTracking(True)
         screen = QApplication.primaryScreen().geometry()
-        self.move(screen.width() - 400, 40)
-        # Platform-aware screen capture exclusion
-        QTimer.singleShot(500, lambda: apply_screen_capture_exclusion(self))
+        self.move(screen.width() - 410, 40)
+        # Apply screen-capture exclusion AFTER window is created
+        QTimer.singleShot(600, lambda: apply_screen_capture_exclusion(self))
+
+    # ── UI construction ───────────────────────────────────────────────────────
 
     def _build_ui(self):
         self.container = QFrame(self)
-        # Container will always be resized to fill window via resizeEvent
         self.container.setGeometry(0, 0, self.width(), self.height())
         self.container.setObjectName("container")
         self.container.setStyleSheet(self._stylesheet())
-        # Mouse tracking + event filter so container-level mouse events
-        # are forwarded to our resize/cursor logic (container sits on top
-        # of the window and would otherwise swallow every mouse event)
         self.container.setMouseTracking(True)
         self.container.installEventFilter(self)
+
         layout = QVBoxLayout(self.container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._build_titlebar())
         layout.addWidget(self._build_controls())
-        layout.addWidget(self._build_tabs(), 1)  # stretch=1 → fills all spare height
+        layout.addWidget(self._build_tabs(), 1)
         layout.addWidget(self._build_statusbar())
 
     def _build_titlebar(self):
-        bar = QFrame(); bar.setFixedHeight(46); bar.setObjectName("titleBar")
-        h = QHBoxLayout(bar); h.setContentsMargins(14,0,10,0); h.setSpacing(8)
-        dot = QLabel("●"); dot.setStyleSheet("color:#00E5FF;font-size:10px;")
-        title = QLabel("VivekAI"); title.setStyleSheet(
-            "color:#FFF;font-size:15px;font-weight:700;font-family:'Segoe UI';letter-spacing:1px;")
-        # Platform badge
+        bar = QFrame()
+        bar.setFixedHeight(46)
+        bar.setObjectName("titleBar")
+        h = QHBoxLayout(bar)
+        h.setContentsMargins(14, 0, 10, 0)
+        h.setSpacing(8)
+
+        dot   = QLabel("●")
+        dot.setStyleSheet("color:#00E5FF;font-size:10px;")
+        title = QLabel("VivekAI")
+        title.setStyleSheet(
+            "color:#FFF;font-size:15px;font-weight:700;"
+            "font-family:'Segoe UI';letter-spacing:1px;"
+        )
         plat_icon = "🪟" if self.platform == "windows" else "🍎"
-        plat_col = "#00E5FF" if self.platform == "windows" else "#A855F7"
-        ver = QLabel(f"{plat_icon} v3.0")
+        plat_col  = "#00E5FF" if self.platform == "windows" else "#A855F7"
+        ver = QLabel(f"{plat_icon} v3.1")
         ver.setStyleSheet(
             f"color:{plat_col};font-size:9px;font-weight:600;"
             f"background:rgba(0,0,0,0.2);border:1px solid {plat_col}44;"
-            "border-radius:4px;padding:1px 6px;")
-        h.addWidget(dot); h.addWidget(title); h.addWidget(ver); h.addStretch()
-        # Settings button (for change platform)
-        settings_btn = self._icon_btn("⚙", "#555", self._show_settings_menu)
-        h.addWidget(settings_btn)
-        h.addWidget(self._icon_btn("—","#888",self._toggle_minimize))
-        h.addWidget(self._icon_btn("✕","#FF5252",self.hide))
+            "border-radius:4px;padding:1px 6px;"
+        )
+        h.addWidget(dot); h.addWidget(title); h.addWidget(ver)
+        h.addStretch()
+        h.addWidget(self._icon_btn("⚙", "#555", self._show_settings_menu))
+        h.addWidget(self._icon_btn("—", "#888", self._toggle_minimize))
+        h.addWidget(self._icon_btn("🗖", "#888", self._toggle_maximize))
+        h.addWidget(self._icon_btn("✕", "#FF5252", self.close))
+
         bar.mousePressEvent = self._drag_start
         bar.mouseMoveEvent  = self._drag_move
         return bar
 
     def _show_settings_menu(self):
-        """Show settings dropdown with Change Platform option"""
         from ui.platform_selector import reset_platform  # type: ignore
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu {
-                background: #0D1117; color: #E0E0E0;
-                border: 1px solid rgba(0,229,255,0.2);
-                border-radius: 8px; padding: 4px;
-                font-family: 'Segoe UI'; font-size: 12px;
+                background:#0D1117;color:#E0E0E0;
+                border:1px solid rgba(0,229,255,0.2);
+                border-radius:8px;padding:4px;
+                font-family:'Segoe UI';font-size:12px;
             }
-            QMenu::item { padding: 8px 16px; border-radius: 4px; }
-            QMenu::item:selected { background: rgba(0,229,255,0.12); }
-            QMenu::separator { background: rgba(255,255,255,0.08); height: 1px; margin: 4px 8px; }
+            QMenu::item{padding:8px 16px;border-radius:4px;}
+            QMenu::item:selected{background:rgba(0,229,255,0.12);}
+            QMenu::separator{background:rgba(255,255,255,0.08);height:1px;margin:4px 8px;}
         """)
         plat_icon = "🍎" if self.platform == "windows" else "🪟"
         plat_name = "macOS" if self.platform == "windows" else "Windows"
-        change_act = QAction(f"{plat_icon}  Switch to {plat_name}", self)
-        change_act.triggered.connect(self._change_platform)
+        change_act     = QAction(f"{plat_icon}  Switch to {plat_name}", self)
         transcript_act = QAction("📁  Open Transcripts", self)
+        about_act      = QAction("ℹ️  About VivekAI v3.1", self)
+        change_act.triggered.connect(self._change_platform)
         transcript_act.triggered.connect(self._open_transcripts)
-        about_act = QAction("ℹ️  About VivekAI v3.0", self)
         about_act.triggered.connect(self._show_about)
         menu.addAction(change_act)
         menu.addSeparator()
@@ -196,10 +268,9 @@ class VivekAIOverlay(QWidget):
         menu.exec_(self.mapToGlobal(self.rect().topRight()))
 
     def _change_platform(self):
-        """Reset platform choice and show selector again"""
         from ui.platform_selector import reset_platform, PlatformSelector  # type: ignore
         if self.is_listening: self._stop_listening()
-        if self.is_watching: self._stop_watching()
+        if self.is_watching:  self._stop_watching()
         reset_platform()
         selector = PlatformSelector()
         selector.platform_selected.connect(self._on_platform_changed)
@@ -207,63 +278,87 @@ class VivekAIOverlay(QWidget):
         self._selector = selector
 
     def _on_platform_changed(self, new_platform):
-        """Handle platform change"""
         self.platform = new_platform
-        self._build_ui()  # Rebuild UI with new platform
+        self._build_ui()
         self.status_label.setText(
-            f"✅ Switched to {'Windows 🪟' if new_platform == 'windows' else 'macOS 🍎'}"
+            f"✅ Switched to "
+            f"{'Windows 🪟' if new_platform == 'windows' else 'macOS 🍎'}"
         )
 
     def _show_about(self):
-        """Show about info in status"""
         plat = "Windows 🪟" if self.platform == "windows" else "macOS 🍎"
-        self.status_label.setText(f"VivekAI v3.0 — {plat} — Mic + Screenshot + Auto Watch")
+        self.status_label.setText(
+            f"VivekAI v3.1 — {plat} — Mic + Screenshot + Auto Watch + Resume"
+        )
 
     def _build_controls(self):
-        frame = QFrame(); frame.setObjectName("controls"); frame.setFixedHeight(54)
-        h = QHBoxLayout(frame); h.setContentsMargins(12,6,12,6); h.setSpacing(8)
-        self.mode_combo = QComboBox(); self.mode_combo.setObjectName("combo")
+        frame = QFrame()
+        frame.setObjectName("controls")
+        frame.setFixedHeight(54)
+        h = QHBoxLayout(frame)
+        h.setContentsMargins(12, 6, 12, 6)
+        h.setSpacing(8)
+
+        self.mode_combo = QComboBox()
+        self.mode_combo.setObjectName("combo")
         self.mode_combo.setFixedWidth(148)
         for m in get_mode_list():
             self.mode_combo.addItem(f"{get_mode_icon(m)} {m}", m)
-        self.engine_combo = QComboBox(); self.engine_combo.setObjectName("combo")
+
+        self.engine_combo = QComboBox()
+        self.engine_combo.setObjectName("combo")
         self.engine_combo.setFixedWidth(110)
-        for label, val in [("⚡ Groq","groq"),("🌟 Gemini","gemini"),("🏠 Ollama","ollama")]:
+        for label, val in [("⚡ Groq","groq"),
+                            ("🌟 Gemini","gemini"),
+                            ("🏠 Ollama","ollama")]:
             self.engine_combo.addItem(label, val)
+
         self.listen_btn = QPushButton("▶  Start Mic")
         self.listen_btn.setFixedWidth(100)
         self.listen_btn.setObjectName("listenBtn")
         self.listen_btn.clicked.connect(self._toggle_listen)
-        h.addWidget(self.mode_combo); h.addWidget(self.engine_combo)
-        h.addStretch(); h.addWidget(self.listen_btn)
+
+        h.addWidget(self.mode_combo)
+        h.addWidget(self.engine_combo)
+        h.addStretch()
+        h.addWidget(self.listen_btn)
         return frame
 
     def _build_tabs(self):
-        self.tabs = QTabWidget(); self.tabs.setObjectName("tabs")
-        self.tabs.addTab(self._build_mic_tab(),        "🎙  Mic")
-        self.tabs.addTab(self._build_screenshot_tab(), "📸  Screenshot")
-        self.tabs.addTab(self._build_watch_tab(),      "👁  Auto Watch")
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("tabs")
+        self.tabs.addTab(self._build_mic_tab(),        "🎙 Mic")
+        self.tabs.addTab(self._build_screenshot_tab(), "📸 Screen")
+        self.tabs.addTab(self._build_watch_tab(),      "👁 Watch")
+        self.tabs.addTab(self._build_resume_tab(),     "📄 Resume")
         return self.tabs
+
+    # ── Mic tab ───────────────────────────────────────────────────────────────
 
     def _build_mic_tab(self):
         w = QWidget(); v = QVBoxLayout(w)
-        v.setContentsMargins(12,10,12,8); v.setSpacing(8)
-        v.addWidget(self._slabel("🎙  HEARD","#00E5FF"))
-        self.heard_text = QTextEdit(); self.heard_text.setReadOnly(True)
-        self.heard_text.setFixedHeight(72); self.heard_text.setObjectName("heardBox")
+        v.setContentsMargins(12, 10, 12, 8); v.setSpacing(8)
+        v.addWidget(self._slabel("🎙  HEARD", "#00E5FF"))
+        self.heard_text = QTextEdit()
+        self.heard_text.setReadOnly(True)
+        self.heard_text.setFixedHeight(72)
+        self.heard_text.setObjectName("heardBox")
         self.heard_text.setPlaceholderText("Listening for audio...")
         v.addWidget(self.heard_text)
-        v.addWidget(self._slabel("🤖  AI RESPONSE","#69FF47"))
-        self.mic_response = QTextEdit(); self.mic_response.setReadOnly(True)
+        v.addWidget(self._slabel("🤖  AI RESPONSE", "#69FF47"))
+        self.mic_response = QTextEdit()
+        self.mic_response.setReadOnly(True)
         self.mic_response.setObjectName("responseBox")
         self.mic_response.setPlaceholderText("AI answer appears here...")
         v.addWidget(self.mic_response, 1)
         v.addLayout(self._action_btns(self.mic_response))
         return w
 
+    # ── Screenshot tab ────────────────────────────────────────────────────────
+
     def _build_screenshot_tab(self):
         w = QWidget(); v = QVBoxLayout(w)
-        v.setContentsMargins(12,10,12,8); v.setSpacing(8)
+        v.setContentsMargins(12, 10, 12, 8); v.setSpacing(8)
         info = QLabel("Captures your entire screen → AI reads it → Answers automatically")
         info.setStyleSheet("color:#6B7280;font-size:10px;font-style:italic;font-family:'Segoe UI';")
         info.setWordWrap(True)
@@ -273,37 +368,54 @@ class VivekAIOverlay(QWidget):
         self.screenshot_btn.setFixedHeight(46)
         self.screenshot_btn.clicked.connect(self._do_screenshot)
         delay_row = QHBoxLayout()
-        delay_lbl = QLabel("Capture delay:"); delay_lbl.setStyleSheet("color:#888;font-size:11px;font-family:'Segoe UI';")
-        self.delay_combo = QComboBox(); self.delay_combo.setObjectName("combo"); self.delay_combo.setFixedWidth(100)
-        for d in ["Instant","2 seconds","3 seconds","5 seconds"]:
+        delay_lbl = QLabel("Capture delay:")
+        delay_lbl.setStyleSheet("color:#888;font-size:11px;font-family:'Segoe UI';")
+        self.delay_combo = QComboBox()
+        self.delay_combo.setObjectName("combo")
+        self.delay_combo.setFixedWidth(100)
+        for d in ["Instant", "2 seconds", "3 seconds", "5 seconds"]:
             self.delay_combo.addItem(d)
-        delay_row.addWidget(delay_lbl); delay_row.addWidget(self.delay_combo); delay_row.addStretch()
+        delay_row.addWidget(delay_lbl); delay_row.addWidget(self.delay_combo)
+        delay_row.addStretch()
         v.addWidget(self.screenshot_btn); v.addLayout(delay_row)
-        v.addWidget(self._slabel("👁  TEXT DETECTED ON SCREEN","#FFD700"))
-        self.ocr_text = QTextEdit(); self.ocr_text.setReadOnly(True)
-        self.ocr_text.setFixedHeight(72); self.ocr_text.setObjectName("heardBox")
+        v.addWidget(self._slabel("👁  TEXT DETECTED ON SCREEN", "#FFD700"))
+        self.ocr_text = QTextEdit()
+        self.ocr_text.setReadOnly(True)
+        self.ocr_text.setFixedHeight(72)
+        self.ocr_text.setObjectName("heardBox")
         self.ocr_text.setPlaceholderText("Text extracted from screen appears here...")
         v.addWidget(self.ocr_text)
-        v.addWidget(self._slabel("🤖  AI RESPONSE","#69FF47"))
-        self.screenshot_response = QTextEdit(); self.screenshot_response.setReadOnly(True)
+        v.addWidget(self._slabel("🤖  AI RESPONSE", "#69FF47"))
+        self.screenshot_response = QTextEdit()
+        self.screenshot_response.setReadOnly(True)
         self.screenshot_response.setObjectName("responseBox")
         self.screenshot_response.setPlaceholderText("AI answer appears here after screenshot...")
         v.addWidget(self.screenshot_response, 1)
         v.addLayout(self._action_btns(self.screenshot_response))
         return w
 
+    # ── Auto-watch tab ────────────────────────────────────────────────────────
+
     def _build_watch_tab(self):
         w = QWidget(); v = QVBoxLayout(w)
-        v.setContentsMargins(12,10,12,8); v.setSpacing(8)
-        info = QLabel("Watches a screen region continuously. When new question appears → AI answers automatically!")
+        v.setContentsMargins(12, 10, 12, 8); v.setSpacing(8)
+        info = QLabel(
+            "Watches a screen region continuously. "
+            "When new question appears → AI answers automatically!"
+        )
         info.setStyleSheet("color:#6B7280;font-size:10px;font-style:italic;font-family:'Segoe UI';")
         info.setWordWrap(True); v.addWidget(info)
-        self.region_label = QLabel("📍  No region selected — click Select Region or Full Screen")
+
+        self.region_label = QLabel(
+            "📍  No region selected — click Select Region or Full Screen"
+        )
         self.region_label.setStyleSheet(
             "color:#FFD700;font-size:10px;font-weight:600;"
             "background:rgba(255,215,0,0.08);border:1px solid rgba(255,215,0,0.2);"
-            "border-radius:6px;padding:6px 10px;font-family:'Segoe UI';")
+            "border-radius:6px;padding:6px 10px;font-family:'Segoe UI';"
+        )
         self.region_label.setWordWrap(True); v.addWidget(self.region_label)
+
         btn_row = QHBoxLayout(); btn_row.setSpacing(6)
         self.select_region_btn = QPushButton("🖱  Select Region")
         self.select_region_btn.setObjectName("regionBtn")
@@ -314,33 +426,136 @@ class VivekAIOverlay(QWidget):
         self.watch_btn = QPushButton("👁  Start Watching")
         self.watch_btn.setObjectName("watchBtn")
         self.watch_btn.clicked.connect(self._toggle_watch)
-        btn_row.addWidget(self.select_region_btn); btn_row.addWidget(self.fullscreen_btn); btn_row.addWidget(self.watch_btn)
+        btn_row.addWidget(self.select_region_btn)
+        btn_row.addWidget(self.fullscreen_btn)
+        btn_row.addWidget(self.watch_btn)
         v.addLayout(btn_row)
+
         int_row = QHBoxLayout()
-        int_lbl = QLabel("Check every:"); int_lbl.setStyleSheet("color:#888;font-size:11px;font-family:'Segoe UI';")
-        self.interval_combo = QComboBox(); self.interval_combo.setObjectName("combo"); self.interval_combo.setFixedWidth(110)
-        for intv in ["1 second","2 seconds","3 seconds","5 seconds"]:
+        int_lbl = QLabel("Check every:")
+        int_lbl.setStyleSheet("color:#888;font-size:11px;font-family:'Segoe UI';")
+        self.interval_combo = QComboBox()
+        self.interval_combo.setObjectName("combo")
+        self.interval_combo.setFixedWidth(110)
+        for intv in ["1 second", "2 seconds", "3 seconds", "5 seconds"]:
             self.interval_combo.addItem(intv)
         self.interval_combo.setCurrentIndex(1)
         self.interval_combo.currentIndexChanged.connect(self._update_interval)
-        int_row.addWidget(int_lbl); int_row.addWidget(self.interval_combo); int_row.addStretch()
+        int_row.addWidget(int_lbl); int_row.addWidget(self.interval_combo)
+        int_row.addStretch()
         v.addLayout(int_row)
-        v.addWidget(self._slabel("👁  DETECTED ON SCREEN","#FFD700"))
-        self.watch_detected = QTextEdit(); self.watch_detected.setReadOnly(True)
-        self.watch_detected.setFixedHeight(72); self.watch_detected.setObjectName("heardBox")
+
+        v.addWidget(self._slabel("👁  DETECTED ON SCREEN", "#FFD700"))
+        self.watch_detected = QTextEdit()
+        self.watch_detected.setReadOnly(True)
+        self.watch_detected.setFixedHeight(72)
+        self.watch_detected.setObjectName("heardBox")
         self.watch_detected.setPlaceholderText("Screen text appears here automatically...")
         v.addWidget(self.watch_detected)
-        v.addWidget(self._slabel("🤖  AUTO AI RESPONSE","#69FF47"))
-        self.watch_response = QTextEdit(); self.watch_response.setReadOnly(True)
+
+        v.addWidget(self._slabel("🤖  AUTO AI RESPONSE", "#69FF47"))
+        self.watch_response = QTextEdit()
+        self.watch_response.setReadOnly(True)
         self.watch_response.setObjectName("responseBox")
-        self.watch_response.setPlaceholderText("AI answers automatically when new content detected...")
+        self.watch_response.setPlaceholderText(
+            "AI answers automatically when new content detected..."
+        )
         v.addWidget(self.watch_response, 1)
         v.addLayout(self._action_btns(self.watch_response))
         return w
 
+    # ── Resume tab ────────────────────────────────────────────────────────────
+
+    def _build_resume_tab(self):
+        w = QWidget(); v = QVBoxLayout(w)
+        v.setContentsMargins(12, 10, 12, 8); v.setSpacing(8)
+
+        title_lbl = QLabel("📄  RESUME CONTEXT")
+        title_lbl.setStyleSheet(
+            "color:#A78BFA;font-size:9px;font-weight:700;"
+            "letter-spacing:1.5px;font-family:'Segoe UI';"
+        )
+        v.addWidget(title_lbl)
+
+        info = QLabel(
+            "Upload your resume (PDF, DOCX, or TXT). "
+            "VivekAI will automatically tailor all AI answers "
+            "to your background, skills, and experience."
+        )
+        info.setStyleSheet(
+            "color:#6B7280;font-size:10px;font-style:italic;"
+            "font-family:'Segoe UI';"
+        )
+        info.setWordWrap(True)
+        v.addWidget(info)
+
+        # Upload button row
+        upload_row = QHBoxLayout(); upload_row.setSpacing(8)
+        self.upload_btn = QPushButton("📂  Upload Resume")
+        self.upload_btn.setObjectName("uploadBtn")
+        self.upload_btn.setFixedHeight(40)
+        self.upload_btn.clicked.connect(self._upload_resume)
+        self.clear_resume_btn = QPushButton("🗑  Clear")
+        self.clear_resume_btn.setObjectName("clearBtn")
+        self.clear_resume_btn.setFixedWidth(70)
+        self.clear_resume_btn.clicked.connect(self._clear_resume)
+        upload_row.addWidget(self.upload_btn); upload_row.addWidget(self.clear_resume_btn)
+        v.addLayout(upload_row)
+
+        # File label
+        self.resume_file_label = QLabel("No resume loaded")
+        self.resume_file_label.setStyleSheet(
+            "color:#4B5563;font-size:10px;font-family:'Segoe UI';"
+            "background:rgba(167,139,250,0.06);"
+            "border:1px solid rgba(167,139,250,0.15);"
+            "border-radius:6px;padding:6px 10px;"
+        )
+        self.resume_file_label.setWordWrap(True)
+        v.addWidget(self.resume_file_label)
+
+        # Detected skills
+        v.addWidget(self._slabel("🧠  DETECTED CONTEXT (AUTO-PREVIEW)", "#A78BFA"))
+        self.resume_preview = QTextEdit()
+        self.resume_preview.setReadOnly(True)
+        self.resume_preview.setObjectName("resumeBox")
+        self.resume_preview.setPlaceholderText(
+            "Upload a resume above — detected skills, experience and "
+            "education will appear here and automatically enhance all AI answers."
+        )
+        v.addWidget(self.resume_preview, 1)
+
+        # Quick-ask row
+        v.addWidget(self._slabel("💬  QUICK ASK (TEST YOUR CONTEXT)", "#69FF47"))
+        quick_row = QHBoxLayout(); quick_row.setSpacing(6)
+        self.quick_question = QTextEdit()
+        self.quick_question.setObjectName("heardBox")
+        self.quick_question.setFixedHeight(56)
+        self.quick_question.setPlaceholderText(
+            "Type a test question e.g. 'Tell me about yourself'…"
+        )
+        self.quick_ask_btn = QPushButton("Ask")
+        self.quick_ask_btn.setObjectName("copyBtn")
+        self.quick_ask_btn.setFixedWidth(50)
+        self.quick_ask_btn.setFixedHeight(56)
+        self.quick_ask_btn.clicked.connect(self._quick_ask)
+        quick_row.addWidget(self.quick_question, 1)
+        quick_row.addWidget(self.quick_ask_btn)
+        v.addLayout(quick_row)
+
+        self.quick_response = QTextEdit()
+        self.quick_response.setReadOnly(True)
+        self.quick_response.setObjectName("responseBox")
+        self.quick_response.setFixedHeight(90)
+        self.quick_response.setPlaceholderText("Answer appears here…")
+        v.addWidget(self.quick_response)
+
+        return w
+
+    # ── Status bar ────────────────────────────────────────────────────────────
+
     def _build_statusbar(self):
         bar = QFrame(); bar.setFixedHeight(28); bar.setObjectName("statusBar")
-        h = QHBoxLayout(bar); h.setContentsMargins(12,0,12,0)
+        h = QHBoxLayout(bar); h.setContentsMargins(12, 0, 12, 0)
         self.status_label = QLabel("⏳ Loading Whisper...")
         self.status_label.setStyleSheet("color:#888;font-size:10px;")
         self.count_label = QLabel("0 answers")
@@ -348,107 +563,186 @@ class VivekAIOverlay(QWidget):
         h.addWidget(self.status_label); h.addStretch(); h.addWidget(self.count_label)
         return bar
 
+    # ── Small helpers ─────────────────────────────────────────────────────────
+
     def _slabel(self, text, color):
         lbl = QLabel(text)
-        lbl.setStyleSheet(f"color:{color};font-size:9px;font-weight:700;letter-spacing:1.5px;font-family:'Segoe UI';")
+        lbl.setStyleSheet(
+            f"color:{color};font-size:9px;font-weight:700;"
+            "letter-spacing:1.5px;font-family:'Segoe UI';"
+        )
         return lbl
 
     def _action_btns(self, textbox):
         row = QHBoxLayout(); row.setSpacing(6)
-        c = QPushButton("📋  Copy Answer"); c.setObjectName("copyBtn"); c.clicked.connect(lambda: self._copy(textbox))
-        d = QPushButton("🗑  Clear"); d.setObjectName("clearBtn"); d.clicked.connect(textbox.clear)
-        f = QPushButton("📁  Transcripts"); f.setObjectName("clearBtn"); f.clicked.connect(self._open_transcripts)
+        c = QPushButton("📋  Copy Answer")
+        c.setObjectName("copyBtn")
+        c.clicked.connect(lambda: self._copy(textbox))
+        d = QPushButton("🗑  Clear")
+        d.setObjectName("clearBtn")
+        d.clicked.connect(textbox.clear)
+        f = QPushButton("📁  Transcripts")
+        f.setObjectName("clearBtn")
+        f.clicked.connect(self._open_transcripts)
         row.addWidget(c); row.addWidget(d); row.addWidget(f)
         return row
 
     def _icon_btn(self, text, color, callback):
-        btn = QPushButton(text); btn.setFixedSize(26,26)
-        btn.setStyleSheet(f"QPushButton{{background:transparent;color:{color};border:none;font-size:13px;border-radius:5px;}}QPushButton:hover{{background:rgba(255,255,255,0.08);}}")
-        btn.clicked.connect(callback); return btn
+        btn = QPushButton(text)
+        btn.setFixedSize(26, 26)
+        btn.setStyleSheet(
+            f"QPushButton{{background:transparent;color:{color};"
+            "border:none;font-size:13px;border-radius:5px;}}"
+            "QPushButton:hover{background:rgba(255,255,255,0.08);}"
+        )
+        btn.clicked.connect(callback)
+        return btn
+
+    # ── Signal connections ────────────────────────────────────────────────────
 
     def _connect_signals(self):
         self.signals.transcript_ready.connect(self._on_transcript)
         self.signals.response_ready.connect(self._on_mic_response)
         self.signals.status_update.connect(self.status_label.setText)
-        self.signals.model_loaded.connect(lambda: self.status_label.setText("✅ Ready — Mic, Screenshot & Auto-Watch available"))
+        self.signals.model_loaded.connect(
+            lambda: self.status_label.setText(
+                "✅ Ready — Mic, Screenshot, Auto-Watch & Resume available"
+            )
+        )
         self.signals.screen_text_ready.connect(self._on_screen_text)
         self.signals.vision_ready.connect(self._on_vision_response)
-        self.engine_combo.currentIndexChanged.connect(lambda: self.ai_engine.set_engine(self.engine_combo.currentData()))
+        self.engine_combo.currentIndexChanged.connect(
+            lambda: self.ai_engine.set_engine(self.engine_combo.currentData())
+        )
         self.trigger_auto_watch.connect(self._do_auto_watch_ai)
 
     def _load_whisper_async(self):
         def load():
-            self.transcriber.load_model(lambda m: self.signals.status_update.emit(m))
+            self.transcriber.load_model(
+                lambda m: self.signals.status_update.emit(m)
+            )
             self.signals.model_loaded.emit()
         threading.Thread(target=load, daemon=True).start()
 
+    # ── System prompt with optional resume context ────────────────────────────
+
+    def _get_system_prompt(self, mode: str) -> str:
+        base = get_system_prompt(mode)
+        if self.resume_context and RESUME_AVAILABLE:
+            return get_resume_enhanced_prompt(base, self.resume_context)
+        return base
+
+    # ── Mic ───────────────────────────────────────────────────────────────────
+
     def _toggle_listen(self):
         if not self.transcriber.is_loaded:
-            self.status_label.setText("⏳ Whisper still loading..."); return
-        self._start_listening() if not self.is_listening else self._stop_listening()
+            self.status_label.setText("⏳ Whisper still loading...")
+            return
+        if self.is_listening:
+            self._stop_listening()
+        else:
+            self._start_listening()
 
     def _start_listening(self):
         self.is_listening = True
-        self.listen_btn.setText("■  Stop Mic"); self.listen_btn.setProperty("active","true"); self.listen_btn.setStyle(self.listen_btn.style())
-        mode = self.mode_combo.currentData(); engine = self.engine_combo.currentData()
-        self.ai_engine.set_engine(engine); self.transcript_mgr.start_session(mode, engine.upper())
-        self.audio_capture = AudioCapture(self._on_audio_chunk); self.audio_capture.start()
+        self.listen_btn.setText("■  Stop Mic")
+        self.listen_btn.setProperty("active", "true")
+        self.listen_btn.setStyle(self.listen_btn.style())
+        mode   = self.mode_combo.currentData()
+        engine = self.engine_combo.currentData()
+        self.ai_engine.set_engine(engine)
+        self.transcript_mgr.start_session(mode, engine.upper())
+        self.audio_capture = AudioCapture(self._on_audio_chunk)
+        self.audio_capture.start()
         self.status_label.setText(f"🔴 Listening | {mode} | {engine.upper()}")
 
     def _stop_listening(self):
         self.is_listening = False
-        self.listen_btn.setText("▶  Start Mic"); self.listen_btn.setProperty("active","false"); self.listen_btn.setStyle(self.listen_btn.style())
-        if self.audio_capture: self.audio_capture.stop(); self.audio_capture = None
+        self.listen_btn.setText("▶  Start Mic")
+        self.listen_btn.setProperty("active", "false")
+        self.listen_btn.setStyle(self.listen_btn.style())
+        if self.audio_capture:
+            self.audio_capture.stop()
+            self.audio_capture = None
         self.transcript_mgr.stop_session()
-        self.status_label.setText(f"⏹ Stopped | {self.transcript_mgr.get_entry_count()} saved")
+        self.status_label.setText(
+            f"⏹ Stopped | {self.transcript_mgr.get_entry_count()} saved"
+        )
 
     def _on_audio_chunk(self, audio_chunk, sample_rate):
         def process():
             text = self.transcriber.transcribe(audio_chunk, sample_rate)
             if text:
                 self.signals.transcript_ready.emit(text)
-                worker = AIWorker(text, get_system_prompt(self.mode_combo.currentData()), self.ai_engine, self.signals)
+                worker = AIWorker(
+                    text,
+                    self._get_system_prompt(self.mode_combo.currentData()),
+                    self.ai_engine,
+                    self.signals
+                )
                 self.workers.append(worker)
-                worker.finished.connect(lambda: self.workers.remove(worker) if worker in self.workers else None)
+                worker.finished.connect(
+                    lambda: self.workers.remove(worker) if worker in self.workers else None
+                )
                 worker.start()
         threading.Thread(target=process, daemon=True).start()
 
     def _on_transcript(self, text):
-        self.heard_text.setPlainText(text); self.status_label.setText("⚡ Generating response...")
+        self.heard_text.setPlainText(text)
+        self.status_label.setText("⚡ Generating response...")
 
     def _on_mic_response(self, response, engine, elapsed):
         self.mic_response.setPlainText(response)
-        self.transcript_mgr.add_entry(self.heard_text.toPlainText(), response)
-        self.count_label.setText(f"{self.transcript_mgr.get_entry_count()} answers")
-        self.status_label.setText(f"✅ {engine} | {elapsed}s | {'🔴 Listening' if self.is_listening else 'Ready'}")
+        self.transcript_mgr.add_entry(
+            self.heard_text.toPlainText(), response
+        )
+        self.count_label.setText(
+            f"{self.transcript_mgr.get_entry_count()} answers"
+        )
+        self.status_label.setText(
+            f"✅ {engine} | {elapsed}s | "
+            f"{'🔴 Listening' if self.is_listening else 'Ready'}"
+        )
+
+    # ── Screenshot ────────────────────────────────────────────────────────────
 
     def _do_screenshot(self):
-        delays = {"Instant":0,"2 seconds":2,"3 seconds":3,"5 seconds":5}
+        delays = {"Instant": 0, "2 seconds": 2,
+                  "3 seconds": 3, "5 seconds": 5}
         delay = delays.get(self.delay_combo.currentText(), 0)
         self.screenshot_btn.setText("⏳  Capturing...")
         self.screenshot_btn.setEnabled(False)
-        self.status_label.setText(f"📸 Capturing in {self.delay_combo.currentText()}...")
+        self.status_label.setText(
+            f"📸 Capturing in {self.delay_combo.currentText()}..."
+        )
 
         def _prepare_capture():
             self.hide()
-            # Allow window to actually vanish before snapping the screen
-            QTimer.singleShot(150, _execute_capture)
+            QTimer.singleShot(180, _execute_capture)
 
         def _execute_capture():
             QApplication.processEvents()
             screenshot, ocr_text = self.screen_vision.capture_and_read()
             self.show()
-            
             if screenshot:
-                if ocr_text: self.signals.screen_text_ready.emit(ocr_text)
+                if ocr_text:
+                    self.signals.screen_text_ready.emit(ocr_text)
                 self.status_label.setText("🤖 Vision AI analyzing screen...")
-                worker = VisionWorker(screenshot, self.mode_combo.currentData(), self.vision_client, self.signals)
+                worker = VisionWorker(
+                    screenshot,
+                    self.mode_combo.currentData(),
+                    self.vision_client,
+                    self.signals
+                )
                 self.workers.append(worker)
-                worker.finished.connect(lambda: self.workers.remove(worker) if worker in self.workers else None)
+                worker.finished.connect(
+                    lambda: self.workers.remove(worker) if worker in self.workers else None
+                )
                 worker.start()
             else:
-                self.status_label.setText("❌ Screenshot failed — check Tesseract install")
-            
+                self.status_label.setText(
+                    "❌ Screenshot failed — check Tesseract install"
+                )
             self.screenshot_btn.setText("📸  Capture Screen & Get Answer")
             self.screenshot_btn.setEnabled(True)
 
@@ -456,16 +750,23 @@ class VivekAIOverlay(QWidget):
 
     def _on_screen_text(self, text):
         short = text[:500] + "..." if len(text) > 500 else text
-        self.ocr_text.setPlainText(short); self.watch_detected.setPlainText(short)
+        self.ocr_text.setPlainText(short)
+        self.watch_detected.setPlainText(short)
 
     def _on_vision_response(self, response, engine, elapsed):
-        self.screenshot_response.setPlainText(response); self.watch_response.setPlainText(response)
+        self.screenshot_response.setPlainText(response)
+        self.watch_response.setPlainText(response)
         self.transcript_mgr.add_entry("[Screen]", response)
-        self.count_label.setText(f"{self.transcript_mgr.get_entry_count()} answers")
+        self.count_label.setText(
+            f"{self.transcript_mgr.get_entry_count()} answers"
+        )
         self.status_label.setText(f"✅ {engine} | {elapsed}s")
 
+    # ── Auto-watch ────────────────────────────────────────────────────────────
+
     def _select_region(self):
-        self.hide(); QTimer.singleShot(300, self._open_selector)
+        self.hide()
+        QTimer.singleShot(300, self._open_selector)
 
     def _open_selector(self):
         self.selector = RegionSelector()
@@ -476,34 +777,50 @@ class VivekAIOverlay(QWidget):
     def _on_region_selected(self, x1, y1, x2, y2):
         self.watch_region = (x1, y1, x2, y2)
         self.screen_vision.set_region(x1, y1, x2, y2)
-        self.region_label.setText(f"📍  Region: ({x1},{y1}) → ({x2},{y2})  [{x2-x1}×{y2-y1}px]")
-        self.show(); self.status_label.setText("✅ Region selected — click 'Start Watching'")
+        self.region_label.setText(
+            f"📍  Region: ({x1},{y1}) → ({x2},{y2})  "
+            f"[{x2-x1}×{y2-y1}px]"
+        )
+        self.show()
+        self.status_label.setText("✅ Region selected — click 'Start Watching'")
 
     def _use_fullscreen(self):
-        self.watch_region = None; self.screen_vision.watch_region = None
-        self.region_label.setText("📍  Full screen selected — click 'Start Watching'")
+        self.watch_region = None
+        self.screen_vision.watch_region = None
+        self.region_label.setText(
+            "📍  Full screen selected — click 'Start Watching'"
+        )
 
     def _toggle_watch(self):
-        self._start_watching() if not self.is_watching else self._stop_watching()
+        if self.is_watching:
+            self._stop_watching()
+        else:
+            self._start_watching()
 
     def _start_watching(self):
         self.is_watching = True
-        self.watch_btn.setText("⏹  Stop Watching"); self.watch_btn.setProperty("active","true"); self.watch_btn.setStyle(self.watch_btn.style())
+        self.watch_btn.setText("⏹  Stop Watching")
+        self.watch_btn.setProperty("active", "true")
+        self.watch_btn.setStyle(self.watch_btn.style())
         self.screen_vision.start_watching(self.watch_region)
-        self.status_label.setText(f"👁 Watching {'full screen' if not self.watch_region else 'region'} for new content...")
+        self.status_label.setText(
+            f"👁 Watching "
+            f"{'full screen' if not self.watch_region else 'region'} "
+            "for new content..."
+        )
 
     def _stop_watching(self):
         self.is_watching = False
-        self.watch_btn.setText("👁  Start Watching"); self.watch_btn.setProperty("active","false"); self.watch_btn.setStyle(self.watch_btn.style())
-        self.screen_vision.stop_watching(); self.status_label.setText("⏹ Auto-watch stopped")
+        self.watch_btn.setText("👁  Start Watching")
+        self.watch_btn.setProperty("active", "false")
+        self.watch_btn.setStyle(self.watch_btn.style())
+        self.screen_vision.stop_watching()
+        self.status_label.setText("⏹ Auto-watch stopped")
 
     def _on_screen_text_detected(self, text):
-        # Called from background threading.Thread by ScreenVision.
-        # Fire signal to securely cross into GUI main thread!
         self.trigger_auto_watch.emit(text)
 
     def _do_auto_watch_ai(self, text):
-        # Safe to access GUI widgets since we're in the main thread now
         self.signals.screen_text_ready.emit(text)
         watch_signals = WorkerSignals()
         watch_signals.response_ready.connect(
@@ -511,22 +828,111 @@ class VivekAIOverlay(QWidget):
         )
         worker = AIWorker(
             f"Answer this from screen:\n{text[:800]}",
-            get_system_prompt(self.mode_combo.currentData()),
+            self._get_system_prompt(self.mode_combo.currentData()),
             self.ai_engine,
             watch_signals
         )
         self.workers.append(worker)
-        worker.finished.connect(lambda: self.workers.remove(worker) if worker in self.workers else None)
+        worker.finished.connect(
+            lambda: self.workers.remove(worker) if worker in self.workers else None
+        )
         worker.start()
 
     def _update_interval(self):
-        intervals = {"1 second":1.0,"2 seconds":2.0,"3 seconds":3.0,"5 seconds":5.0}
-        self.screen_vision.watch_interval = intervals.get(self.interval_combo.currentText(), 2.0)
+        intervals = {
+            "1 second": 1.0, "2 seconds": 2.0,
+            "3 seconds": 3.0, "5 seconds": 5.0,
+        }
+        self.screen_vision.watch_interval = intervals.get(
+            self.interval_combo.currentText(), 2.0
+        )
+
+    # ── Resume feature ────────────────────────────────────────────────────────
+
+    def _upload_resume(self):
+        if not RESUME_AVAILABLE:
+            self.status_label.setText(
+                "❌ Resume parsing needs: pip install pdfminer.six python-docx"
+            )
+            return
+
+        filepath, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Resume File",
+            os.path.expanduser("~"),
+            "Documents (*.pdf *.docx *.doc *.txt);;All Files (*)"
+        )
+        if not filepath:
+            return
+
+        filename = os.path.basename(filepath)
+        self.resume_file_label.setText(f"📄 {filename}  — parsing…")
+        self.status_label.setText("⏳ Parsing resume…")
+        self.upload_btn.setEnabled(False)
+
+        worker = ResumeParseWorker(filepath)
+        self._resume_worker = worker
+        worker.parse_done.connect(self._on_resume_parsed)
+        worker.start()
+
+    def _on_resume_parsed(self, status_msg: str, context_text: str):
+        self.upload_btn.setEnabled(True)
+        self.status_label.setText(status_msg)
+        if context_text:
+            self.resume_context = context_text
+            self.resume_preview.setPlainText(context_text)
+            # Update file label with success style
+            self.resume_file_label.setStyleSheet(
+                "color:#A78BFA;font-size:10px;font-family:'Segoe UI';"
+                "background:rgba(167,139,250,0.08);"
+                "border:1px solid rgba(167,139,250,0.3);"
+                "border-radius:6px;padding:6px 10px;"
+            )
+            self.resume_file_label.setText(status_msg)
+        else:
+            self.resume_context = ""
+            self.resume_preview.setPlainText(status_msg)
+
+    def _clear_resume(self):
+        self.resume_context = ""
+        self.resume_preview.clear()
+        self.resume_file_label.setText("No resume loaded")
+        self.resume_file_label.setStyleSheet(
+            "color:#4B5563;font-size:10px;font-family:'Segoe UI';"
+            "background:rgba(167,139,250,0.06);"
+            "border:1px solid rgba(167,139,250,0.15);"
+            "border-radius:6px;padding:6px 10px;"
+        )
+        self.status_label.setText("🗑 Resume context cleared")
+
+    def _quick_ask(self):
+        q = self.quick_question.toPlainText().strip()
+        if not q:
+            return
+        self.status_label.setText("⚡ Generating quick answer…")
+        prompt = self._get_system_prompt(self.mode_combo.currentData())
+
+        quick_signals = WorkerSignals()
+        quick_signals.response_ready.connect(
+            lambda r, e, t: (
+                self.quick_response.setPlainText(r),
+                self.status_label.setText(f"✅ {e} | {t}s"),
+            )
+        )
+        worker = AIWorker(q, prompt, self.ai_engine, quick_signals)
+        self.workers.append(worker)
+        worker.finished.connect(
+            lambda: self.workers.remove(worker) if worker in self.workers else None
+        )
+        worker.start()
+
+    # ── Utility ───────────────────────────────────────────────────────────────
 
     def _copy(self, textbox):
         text = textbox.toPlainText()
         if text:
-            pyperclip.copy(text); self.status_label.setText("📋 Copied!")
+            pyperclip.copy(text)
+            self.status_label.setText("📋 Copied!")
             QTimer.singleShot(2000, lambda: self.status_label.setText("✅ Ready"))
 
     def _open_transcripts(self):
@@ -534,20 +940,26 @@ class VivekAIOverlay(QWidget):
 
     def _toggle_minimize(self):
         if not self._is_minimized:
-            # Minimize: collapse to title-bar only
             self._normal_height = self.height()
-            self._is_minimized = True
+            self._is_minimized  = True
             self.setMinimumHeight(46)
             self.setMaximumHeight(46)
             self.resize(self.width(), 46)
         else:
-            # Restore
             self._is_minimized = False
-            self.setMinimumSize(300, 380)
+            self.setMinimumSize(320, 420)
             self.setMaximumSize(16777215, 16777215)
             self.resize(self.width(), self._normal_height)
 
-    # ── Title-bar drag (called from bar.mousePressEvent / bar.mouseMoveEvent) ──
+    def _toggle_maximize(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+
+
+    # ── Drag (title bar) ──────────────────────────────────────────────────────
+
     def _drag_start(self, e):
         if e.button() == Qt.LeftButton:
             self._drag_pos = e.globalPos() - self.frameGeometry().topLeft()
@@ -556,9 +968,15 @@ class VivekAIOverlay(QWidget):
         if e.buttons() == Qt.LeftButton and self._drag_pos and not self._resize_dir:
             self.move(e.globalPos() - self._drag_pos)
 
-    # ── Resize helpers ──
+    # ── Resize logic (INVISIBLE to screen share) ──────────────────────────────
+
     def _get_resize_dir(self, pos):
-        """Return (str direction, Qt cursor) for a local mouse position, or None."""
+        """
+        Return (direction_str, Qt_cursor) for a window-local mouse position,
+        or None if not near an edge.
+        The cursors are only painted on the local display — SetWindowDisplayAffinity
+        means the entire window (including cursor overlays) is excluded from capture.
+        """
         x, y, w, h = pos.x(), pos.y(), self.width(), self.height()
         m = RESIZE_MARGIN
         left   = x < m
@@ -576,26 +994,35 @@ class VivekAIOverlay(QWidget):
         return None
 
     def _apply_resize(self, global_pos):
-        """Update window geometry based on mouse movement during resize."""
-        if not self._resize_dir or not self._resize_start_geom or not self._resize_start_pos:
-            return
-        dx = global_pos.x() - self._resize_start_pos.x()  # type: ignore
-        dy = global_pos.y() - self._resize_start_pos.y()  # type: ignore
-        g  = self._resize_start_geom
-        x, y, w, h = g.x(), g.y(), g.width(), g.height()  # type: ignore
-        min_w, min_h = self.minimumWidth(), self.minimumHeight()
         d = self._resize_dir
-        if d in ("r",  "tr", "br"): w  = max(min_w, w + dx)
-        if d in ("l",  "tl", "bl"): new_x = x + dx; new_w = w - dx
-        if d in ("b",  "bl", "br"): h  = max(min_h, h + dy)
-        if d in ("t",  "tl", "tr"): new_y = y + dy; new_h = h - dy
-        if d in ("l",  "tl", "bl") and new_w >= min_w:  # type: ignore
-            x = new_x; w = new_w  # type: ignore
-        if d in ("t",  "tl", "tr") and new_h >= min_h:  # type: ignore
-            y = new_y; h = new_h  # type: ignore
-        self.setGeometry(x, y, w, h)
+        g = self._resize_start_geom
+        p = self._resize_start_pos
+        if not d or not g or not p:
+            return
+            
+        assert p is not None
+        assert g is not None
+        
+        dx = global_pos.x() - p.x()
+        dy = global_pos.y() - p.y()
+        x, y, w, h = g.x(), g.y(), g.width(), g.height()
+        min_w, min_h = self.minimumWidth(), self.minimumHeight()
 
-    # ── Event filter: intercepts container mouse events and routes to resize logic ──
+        new_x, new_y, new_w, new_h = x, y, w, h
+        if d in ("r", "tr", "br"): new_w = max(min_w, w + dx)
+        if d in ("b", "bl", "br"): new_h = max(min_h, h + dy)
+        if d in ("l", "tl", "bl"):
+            cand_x, cand_w = x + dx, w - dx
+            if cand_w >= min_w:
+                new_x, new_w = cand_x, cand_w
+        if d in ("t", "tl", "tr"):
+            cand_y, cand_h = y + dy, h - dy
+            if cand_h >= min_h:
+                new_y, new_h = cand_y, cand_h
+        self.setGeometry(new_x, new_y, new_w, new_h)
+
+    # ── Event filter (container mouse events → resize / cursor) ───────────────
+
     def eventFilter(self, obj, event):
         if obj is not self.container:
             return super().eventFilter(obj, event)
@@ -603,19 +1030,11 @@ class VivekAIOverlay(QWidget):
         etype = event.type()
 
         if etype == QEvent.MouseMove:
-            # Remap local pos from container coords → window coords (they match
-            # since container always fills the window, but mapTo is explicit)
             win_pos = self.container.mapTo(self, event.pos())
-
             if event.buttons() == Qt.LeftButton and self._resize_dir:
-                # Active resize drag
                 self._apply_resize(event.globalPos())
                 return True
-            elif event.buttons() == Qt.LeftButton and self._drag_pos:
-                # Title-bar drag handled via _drag_move; nothing extra needed
-                pass
-            else:
-                # Hover — show resize cursor near edges, normal cursor inside
+            elif not (event.buttons() & Qt.LeftButton):
                 result = self._get_resize_dir(win_pos)
                 if result:
                     self.container.setCursor(QCursor(result[1]))
@@ -626,10 +1045,10 @@ class VivekAIOverlay(QWidget):
             win_pos = self.container.mapTo(self, event.pos())
             result  = self._get_resize_dir(win_pos)
             if result:
-                self._resize_dir        = result[0]  # type: ignore
+                self._resize_dir        = result[0]
                 self._resize_start_geom = self.geometry()
                 self._resize_start_pos  = event.globalPos()
-                return True   # consume — don’t pass to child widgets
+                return True
 
         elif etype == QEvent.MouseButtonRelease:
             if self._resize_dir:
@@ -647,47 +1066,134 @@ class VivekAIOverlay(QWidget):
         self._drag_pos          = None
 
     def resizeEvent(self, e):
-        """Keep the inner container perfectly filling the window at all times."""
         if hasattr(self, "container"):
             self.container.setGeometry(0, 0, self.width(), self.height())
         super().resizeEvent(e)
 
     def paintEvent(self, e):
-        p = QPainter(self); p.setRenderHint(QPainter.Antialiasing)
-        p.setBrush(QBrush(QColor(0,0,0,0))); p.setPen(Qt.NoPen)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setBrush(QBrush(QColor(0, 0, 0, 0)))
+        p.setPen(Qt.NoPen)
         p.drawRoundedRect(self.rect(), 14, 14)
 
     def closeEvent(self, e):
         if self.is_listening: self._stop_listening()
-        if self.is_watching: self._stop_watching()
+        if self.is_watching:  self._stop_watching()
         e.accept()
+
+    # ── Stylesheet ────────────────────────────────────────────────────────────
 
     def _stylesheet(self):
         return """
         #container {
-            background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 rgba(12,14,22,0.97),stop:1 rgba(8,10,18,0.97));
+            background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                stop:0 rgba(12,14,22,0.97), stop:1 rgba(8,10,18,0.97));
             border-radius:14px; border:1px solid rgba(0,229,255,0.18);
         }
-        #titleBar { background:rgba(0,229,255,0.05); border-bottom:1px solid rgba(0,229,255,0.12); border-top-left-radius:14px; border-top-right-radius:14px; }
-        #controls { background:rgba(255,255,255,0.02); border-bottom:1px solid rgba(255,255,255,0.05); }
-        #statusBar { background:rgba(0,0,0,0.2); border-top:1px solid rgba(255,255,255,0.05); border-bottom-left-radius:14px; border-bottom-right-radius:14px; }
+        #titleBar {
+            background:rgba(0,229,255,0.05);
+            border-bottom:1px solid rgba(0,229,255,0.12);
+            border-top-left-radius:14px; border-top-right-radius:14px;
+        }
+        #controls {
+            background:rgba(255,255,255,0.02);
+            border-bottom:1px solid rgba(255,255,255,0.05);
+        }
+        #statusBar {
+            background:rgba(0,0,0,0.2);
+            border-top:1px solid rgba(255,255,255,0.05);
+            border-bottom-left-radius:14px; border-bottom-right-radius:14px;
+        }
         QTabWidget#tabs::pane { border:none; background:transparent; }
-        QTabBar::tab { background:rgba(255,255,255,0.04); color:#888; padding:8px 16px; border:none; font-family:'Segoe UI'; font-size:11px; }
-        QTabBar::tab:selected { background:rgba(0,229,255,0.1); color:#00E5FF; border-bottom:2px solid #00E5FF; }
+        QTabBar::tab {
+            background:rgba(255,255,255,0.04); color:#888;
+            padding:7px 12px; border:none;
+            font-family:'Segoe UI'; font-size:11px;
+        }
+        QTabBar::tab:selected {
+            background:rgba(0,229,255,0.1); color:#00E5FF;
+            border-bottom:2px solid #00E5FF;
+        }
         QTabBar::tab:hover { background:rgba(255,255,255,0.08); color:#CCC; }
-        QComboBox#combo { background:rgba(255,255,255,0.06); color:#E0E0E0; border:1px solid rgba(255,255,255,0.1); border-radius:7px; padding:4px 10px; font-size:12px; font-family:'Segoe UI'; }
-        QComboBox QAbstractItemView { background:#0D1117; color:#E0E0E0; selection-background-color:rgba(0,229,255,0.2); border:1px solid rgba(0,229,255,0.2); border-radius:6px; }
-        QPushButton#listenBtn { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #00B4DB,stop:1 #0083B0); color:white; border:none; border-radius:7px; padding:5px 12px; font-size:11px; font-weight:600; font-family:'Segoe UI'; }
-        QPushButton#listenBtn[active="true"] { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #FF4E50,stop:1 #F9D423); }
-        QPushButton#screenshotBtn { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #7C3AED,stop:1 #4F46E5); color:white; border:none; border-radius:8px; font-size:13px; font-weight:700; font-family:'Segoe UI'; }
+        QComboBox#combo {
+            background:rgba(255,255,255,0.06); color:#E0E0E0;
+            border:1px solid rgba(255,255,255,0.1); border-radius:7px;
+            padding:4px 10px; font-size:12px; font-family:'Segoe UI';
+        }
+        QComboBox QAbstractItemView {
+            background:#0D1117; color:#E0E0E0;
+            selection-background-color:rgba(0,229,255,0.2);
+            border:1px solid rgba(0,229,255,0.2); border-radius:6px;
+        }
+        QPushButton#listenBtn {
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                stop:0 #00B4DB, stop:1 #0083B0);
+            color:white; border:none; border-radius:7px;
+            padding:5px 12px; font-size:11px; font-weight:600;
+            font-family:'Segoe UI';
+        }
+        QPushButton#listenBtn[active="true"] {
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                stop:0 #FF4E50, stop:1 #F9D423);
+        }
+        QPushButton#screenshotBtn {
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                stop:0 #7C3AED, stop:1 #4F46E5);
+            color:white; border:none; border-radius:8px;
+            font-size:13px; font-weight:700; font-family:'Segoe UI';
+        }
         QPushButton#screenshotBtn:disabled { background:#333; color:#666; }
-        QPushButton#regionBtn { background:rgba(255,215,0,0.1); color:#FFD700; border:1px solid rgba(255,215,0,0.3); border-radius:7px; padding:6px 12px; font-size:11px; font-family:'Segoe UI'; }
-        QPushButton#watchBtn { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #059669,stop:1 #10B981); color:white; border:none; border-radius:7px; padding:6px 14px; font-size:11px; font-weight:700; font-family:'Segoe UI'; }
-        QPushButton#watchBtn[active="true"] { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #FF4E50,stop:1 #F9D423); }
-        QPushButton#copyBtn { background:rgba(105,255,71,0.1); color:#69FF47; border:1px solid rgba(105,255,71,0.25); border-radius:7px; padding:5px 12px; font-size:11px; font-family:'Segoe UI'; }
-        QPushButton#clearBtn { background:rgba(255,255,255,0.05); color:#888; border:1px solid rgba(255,255,255,0.08); border-radius:7px; padding:5px 12px; font-size:11px; font-family:'Segoe UI'; }
-        QTextEdit#heardBox { background:rgba(0,229,255,0.04); color:#B0BEC5; border:1px solid rgba(0,229,255,0.12); border-radius:8px; padding:8px; font-size:12px; font-family:'Segoe UI'; }
-        QTextEdit#responseBox { background:rgba(105,255,71,0.04); color:#E8F5E9; border:1px solid rgba(105,255,71,0.15); border-radius:8px; padding:10px; font-size:13px; font-family:'Segoe UI'; }
+        QPushButton#regionBtn {
+            background:rgba(255,215,0,0.1); color:#FFD700;
+            border:1px solid rgba(255,215,0,0.3); border-radius:7px;
+            padding:6px 12px; font-size:11px; font-family:'Segoe UI';
+        }
+        QPushButton#watchBtn {
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                stop:0 #059669, stop:1 #10B981);
+            color:white; border:none; border-radius:7px;
+            padding:6px 14px; font-size:11px; font-weight:700;
+            font-family:'Segoe UI';
+        }
+        QPushButton#watchBtn[active="true"] {
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                stop:0 #FF4E50, stop:1 #F9D423);
+        }
+        QPushButton#uploadBtn {
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                stop:0 #7C3AED, stop:1 #A855F7);
+            color:white; border:none; border-radius:8px;
+            font-size:12px; font-weight:700; font-family:'Segoe UI';
+        }
+        QPushButton#uploadBtn:disabled { background:#333; color:#666; }
+        QPushButton#copyBtn {
+            background:rgba(105,255,71,0.1); color:#69FF47;
+            border:1px solid rgba(105,255,71,0.25); border-radius:7px;
+            padding:5px 12px; font-size:11px; font-family:'Segoe UI';
+        }
+        QPushButton#clearBtn {
+            background:rgba(255,255,255,0.05); color:#888;
+            border:1px solid rgba(255,255,255,0.08); border-radius:7px;
+            padding:5px 12px; font-size:11px; font-family:'Segoe UI';
+        }
+        QTextEdit#heardBox {
+            background:rgba(0,229,255,0.04); color:#B0BEC5;
+            border:1px solid rgba(0,229,255,0.12); border-radius:8px;
+            padding:8px; font-size:12px; font-family:'Segoe UI';
+        }
+        QTextEdit#responseBox {
+            background:rgba(105,255,71,0.04); color:#E8F5E9;
+            border:1px solid rgba(105,255,71,0.15); border-radius:8px;
+            padding:10px; font-size:13px; font-family:'Segoe UI';
+        }
+        QTextEdit#resumeBox {
+            background:rgba(167,139,250,0.04); color:#E9D5FF;
+            border:1px solid rgba(167,139,250,0.15); border-radius:8px;
+            padding:10px; font-size:11px; font-family:'Segoe UI';
+        }
         QScrollBar:vertical { background:transparent; width:4px; }
-        QScrollBar::handle:vertical { background:rgba(0,229,255,0.3); border-radius:2px; }
+        QScrollBar::handle:vertical {
+            background:rgba(0,229,255,0.3); border-radius:2px;
+        }
         """

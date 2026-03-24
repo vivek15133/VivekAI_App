@@ -1,14 +1,16 @@
 """
-VivekAI_App - macOS System Integration
-Handles macOS-specific features:
-  - Screen capture exclusion (invisible to screen share)
-  - Menu bar icon (instead of Windows system tray)
-  - macOS paths and permissions
+VivekAI_App - Platform Utilities v3.1
+Handles cross-platform screen-capture exclusion, paths, and permissions.
+
+FIXED: Proper NSWindowSharingNone via objc runtime (macOS).
+       SetWindowDisplayAffinity with WDA_EXCLUDEFROMCAPTURE flag (Windows).
 """
 
 import platform
 import subprocess
 import os
+import ctypes
+import ctypes.util
 
 
 def is_macos():
@@ -23,143 +25,154 @@ def get_platform():
     return "macos" if is_macos() else "windows"
 
 
+# ── Screen-capture exclusion ──────────────────────────────────────────────────
+
 def apply_screen_capture_exclusion(window):
     """
-    Make window invisible to screen share on both platforms
-    Windows: SetWindowDisplayAffinity API
-    macOS:   NSWindowSharingNone via PyObjC
+    Make `window` invisible to screen share / OBS / recording on both platforms.
+    Call this AFTER the window is shown (so winId() is valid).
     """
     if is_windows():
-        try:
-            import ctypes
-            hwnd = int(window.winId())
-            ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x00000011)
-            print("[Windows] Screen capture exclusion applied")
-        except Exception as e:
-            print(f"[Windows] Screen exclusion failed: {e}")
-
+        _exclude_windows(window)
     elif is_macos():
-        try:
-            from AppKit import NSApp, NSWindowSharingNone
-            # Get the native NSWindow and set sharing type
-            ns_window = window.winId().__int__()
-            # Use subprocess as fallback if PyObjC unavailable
-            _apply_macos_exclusion_fallback(window)
-        except ImportError:
-            _apply_macos_exclusion_fallback(window)
-        except Exception as e:
-            print(f"[macOS] Screen exclusion error: {e}")
-            _apply_macos_exclusion_fallback(window)
+        _exclude_macos(window)
 
 
-def _apply_macos_exclusion_fallback(window):
+def _exclude_windows(window):
     """
-    macOS fallback: use NSWindowSharingNone via ctypes
-    Works on macOS 12+ (same effect as SetWindowDisplayAffinity on Windows)
+    SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
+    WDA_EXCLUDEFROMCAPTURE = 0x00000011  — requires Windows 10 2004+
     """
     try:
-        import ctypes
-        import ctypes.util
-        appkit = ctypes.cdll.LoadLibrary(
-            ctypes.util.find_library("AppKit") or "/System/Library/Frameworks/AppKit.framework/AppKit"
-        )
+        hwnd = int(window.winId())
+        ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x00000011)
+        print("[Windows] Screen capture exclusion applied")
+    except Exception as e:
+        print(f"[Windows] Screen exclusion failed: {e}")
+
+
+def _exclude_macos(window):
+    """
+    Set NSWindowSharingNone (= 0) via the ObjC runtime.
+    Works on macOS 12+ without PyObjC installed.
+    """
+    try:
         objc = ctypes.cdll.LoadLibrary(
             ctypes.util.find_library("objc") or "/usr/lib/libobjc.dylib"
         )
-        # NSWindowSharingNone = 0
-        # This sets the window so it won't appear in screen sharing/capture
-        print("[macOS] Screen capture exclusion applied via fallback")
-    except Exception as e:
-        print(f"[macOS] Fallback exclusion failed: {e}")
-        # App still works — just won't be invisible on older macOS
+        objc.objc_getClass.restype    = ctypes.c_void_p
+        objc.sel_registerName.restype = ctypes.c_void_p
+        objc.objc_msgSend.restype     = ctypes.c_void_p
+        objc.objc_msgSend.argtypes    = [ctypes.c_void_p, ctypes.c_void_p,
+                                          ctypes.c_void_p]
 
+        ns_view = ctypes.c_void_p(int(window.winId()))
+        ns_win  = objc.objc_msgSend(
+            ns_view, objc.sel_registerName(b"window"), None
+        )
+        # NSWindowSharingNone = 0
+        objc.objc_msgSend(
+            ns_win,
+            objc.sel_registerName(b"setSharingType:"),
+            ctypes.c_void_p(0)
+        )
+        print("[macOS] Screen capture exclusion applied")
+    except Exception as e:
+        print(f"[macOS] Screen exclusion failed: {e}")
+
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
 
 def get_transcript_dir():
-    """Get platform-appropriate transcript directory"""
     if is_macos():
         return os.path.join(os.path.expanduser("~"), "Documents", "VivekAI_Transcripts")
-    else:
-        return os.path.join(os.path.expanduser("~"), "VivekAI_Transcripts")
+    return os.path.join(os.path.expanduser("~"), "VivekAI_Transcripts")
 
 
 def get_tesseract_path():
-    """Get Tesseract path for current platform"""
     if is_windows():
         return r"C:\Program Files\Tesseract-OCR\tesseract.exe"
     elif is_macos():
-        # Homebrew default path
-        paths = [
-            "/usr/local/bin/tesseract",       # Intel Mac
-            "/opt/homebrew/bin/tesseract",    # Apple Silicon Mac
-        ]
-        for path in paths:
-            if os.path.exists(path):
-                return path
-        return "tesseract"  # fallback to PATH
+        for p in ["/opt/homebrew/bin/tesseract", "/usr/local/bin/tesseract"]:
+            if os.path.exists(p):
+                return p
+        return "tesseract"
     return "tesseract"
 
 
-def get_font_family():
-    """Get best system font for each platform"""
-    if is_macos():
-        return "SF Pro Display"    # macOS system font
-    else:
-        return "Segoe UI"          # Windows system font
+# ── Fonts ─────────────────────────────────────────────────────────────────────
 
+def get_font_family():
+    return "SF Pro Display" if is_macos() else "Segoe UI"
+
+
+# ── File manager ──────────────────────────────────────────────────────────────
 
 def open_folder(path):
-    """Open folder in file manager — platform aware"""
     if is_windows():
         subprocess.Popen(f'explorer "{path}"')
     elif is_macos():
         subprocess.Popen(["open", path])
 
 
+# ── Permissions (macOS) ───────────────────────────────────────────────────────
+
 def check_microphone_permission():
-    """Check if mic permission granted (macOS requires explicit permission)"""
     if is_macos():
         try:
             import AVFoundation
             status = AVFoundation.AVCaptureDevice.authorizationStatusForMediaType_(
                 AVFoundation.AVMediaTypeAudio
             )
-            return status == 3  # AVAuthorizationStatusAuthorized
-        except:
-            return True  # Assume granted if can't check
-    return True  # Windows doesn't need explicit permission check
+            return status == 3
+        except Exception:
+            return True
+    return True
 
 
 def request_microphone_permission():
-    """Request microphone permission on macOS"""
     if is_macos():
         try:
-            script = '''
-            tell application "System Preferences"
-                activate
-                set current pane to pane id "com.apple.preference.security"
-            end tell
-            '''
+            script = (
+                'tell application "System Preferences"\n'
+                '    activate\n'
+                '    set current pane to pane id "com.apple.preference.security"\n'
+                'end tell'
+            )
             subprocess.Popen(["osascript", "-e", script])
-        except:
+        except Exception:
             pass
 
 
-def get_window_flags_for_platform():
-    """Get appropriate Qt window flags for each platform"""
-    from PyQt5.QtCore import Qt
-    base_flags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
-    if is_macos():
-        # On macOS, use NSFloatingWindowLevel equivalent
-        base_flags |= Qt.WindowDoesNotAcceptFocus
-    return base_flags
+# ── Window flags ──────────────────────────────────────────────────────────────
 
+def get_window_flags_for_platform():
+    from PyQt5.QtCore import Qt
+    flags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+    if is_macos():
+        flags |= Qt.WindowDoesNotAcceptFocus
+    return flags
+
+
+# ── Platform info ─────────────────────────────────────────────────────────────
 
 def get_platform_info():
-    """Return platform info dict"""
     return {
         "platform": get_platform(),
-        "system": platform.system(),
-        "release": platform.release(),
-        "version": platform.version(),
-        "machine": platform.machine(),
+        "system":   platform.system(),
+        "release":  platform.release(),
+        "version":  platform.version(),
+        "machine":  platform.machine(),
     }
+
+
+# ── Saved-platform reset ──────────────────────────────────────────────────────
+
+def reset_platform():
+    """Delete saved platform choice so the selector appears on next launch."""
+    try:
+        p = os.path.join(os.path.expanduser("~"), ".vivekaiplatform")
+        if os.path.exists(p):
+            os.remove(p)
+    except Exception:
+        pass

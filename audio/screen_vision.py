@@ -4,14 +4,15 @@ Feature 1: Screenshot button → AI answers what's on screen
 Feature 2: Auto screen reader → watches region, auto-answers new questions
 """
 
-import numpy as np
+import numpy as np  # type: ignore
 import threading
 import time
 import queue
-from PIL import Image, ImageGrab, ImageFilter
-import pytesseract
-import cv2
-import config
+from PIL import Image, ImageGrab, ImageFilter  # type: ignore
+import pytesseract  # type: ignore
+import cv2  # type: ignore
+import config  # type: ignore
+from typing import Optional, Tuple
 
 # ── Tesseract path for Windows ────────────────────────────
 # Tesseract must be installed: https://github.com/UB-Mannheim/tesseract/wiki
@@ -29,9 +30,9 @@ class ScreenVision:
         """
         self.on_text_detected = on_text_detected
         self.auto_watching = False
-        self.watch_region = None        # (x1, y1, x2, y2) or None for full screen
+        self.watch_region: Optional[Tuple[int, int, int, int]] = None        # (x1, y1, x2, y2) or None for full screen
         self.last_text = ""
-        self.watch_thread = None
+        self.watch_thread: Optional[threading.Thread] = None
         self.text_queue = queue.Queue()
         self.min_text_change = 20       # Minimum chars changed to trigger
         self.watch_interval = 2.0       # Check every 2 seconds
@@ -93,10 +94,11 @@ class ScreenVision:
         self.watch_region = region
         self.auto_watching = True
         self.last_text = ""
-        self.watch_thread = threading.Thread(
+        t = threading.Thread(
             target=self._watch_loop, daemon=True
         )
-        self.watch_thread.start()
+        self.watch_thread = t
+        t.start()
 
     def stop_watching(self):
         self.auto_watching = False
@@ -143,7 +145,10 @@ class ScreenVision:
 
             # Convert to grayscale
             if len(img_array.shape) == 3:
-                gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+                if img_array.shape[2] == 4:
+                    gray = cv2.cvtColor(img_array, cv2.COLOR_RGBA2GRAY)
+                else:
+                    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
             else:
                 gray = img_array
 

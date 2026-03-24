@@ -1,28 +1,40 @@
-# VivekAI_App v3.0 — Windows + macOS
+# VivekAI_App v3.1 — Windows + macOS
 # Install: pip install -r requirements.txt
 
-# Audio
+# ── Audio ──────────────────────────────────────────────────────────────────
 pyaudio==0.2.14
 noisereduce==3.0.2
 soundfile==0.12.1
+speechrecognition>=3.10.0
 
-# Speech-to-Text
-openai-whisper==20231117
+# ── Speech-to-Text (choose one) ───────────────────────────────────────────
+# Option A — Whisper (higher accuracy, needs torch)
+# openai-whisper==20231117
 
-# AI APIs
+# ── AI APIs ───────────────────────────────────────────────────────────────
 groq==0.9.0
 google-generativeai==0.7.2
 requests==2.31.0
 
-# UI — works on Windows + macOS
+# ── UI ────────────────────────────────────────────────────────────────────
 PyQt5==5.15.10
 pyperclip==1.8.2
 
-# Screen Vision + OCR
+# ── Screen Vision + OCR ───────────────────────────────────────────────────
 pillow==10.3.0
 pytesseract==0.3.10
 opencv-python==4.9.0.80
 numpy==1.26.4
 
-# Utils
+# ── Resume parsing (NEW in v3.1) ──────────────────────────────────────────
+# PDF extraction
+pdfminer.six>=20221105
+# Fallback PDF extraction
+PyPDF2>=3.0.0
+# DOCX extraction
+python-docx>=1.1.0
+# Alternative DOCX extraction (fallback)
+mammoth>=1.6.0
+
+# ── Utilities ─────────────────────────────────────────────────────────────
 python-dotenv==1.0.0
