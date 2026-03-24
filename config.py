@@ -21,8 +21,8 @@ WHISPER_WORD_TIMESTAMPS = True
 AUDIO_SAMPLE_RATE   = 16000
 AUDIO_CHUNK_SECONDS = 1
 AUDIO_CHANNELS      = 1
-SILENCE_THRESHOLD   = 0.005
-AUDIO_MAX_SILENCE   = 0.5  # Seconds of silence to trigger EOF
+SILENCE_THRESHOLD   = 0.0001
+AUDIO_MAX_SILENCE   = 0.1  # Seconds of silence to trigger EOF
 AUDIO_MAX_LENGTH    = 10.0 # Maximum seconds before forcing a chunk
 
 # â”€â”€ AI ENGINE SETTINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

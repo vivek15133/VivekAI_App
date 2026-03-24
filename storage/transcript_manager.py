@@ -8,7 +8,7 @@ import json
 import threading
 import time
 from datetime import datetime
-import config
+import config  # type: ignore
 
 class TranscriptManager:
     def __init__(self):
@@ -27,20 +27,20 @@ class TranscriptManager:
         os.makedirs(config.TRANSCRIPT_DIR, exist_ok=True)
 
     def start_session(self, mode, engine):
-        self.session_start = datetime.now()
+        self.session_start = datetime.now()  # type: ignore
         self.mode = mode
         self.engine = engine
         self.session_data = {
             "session": {
                 "mode": mode,
                 "engine": engine,
-                "date": self.session_start.strftime("%Y-%m-%d"),
-                "start_time": self.session_start.strftime("%H:%M:%S"),
+                "date": self.session_start.strftime("%Y-%m-%d"),  # type: ignore
+                "start_time": self.session_start.strftime("%H:%M:%S"),  # type: ignore
                 "end_time": "",
                 "duration_seconds": 0
             },
             "transcript": []
-        }
+        }  # type: ignore
         self._start_auto_save()
 
     def add_entry(self, heard_text, ai_response):
@@ -56,26 +56,31 @@ class TranscriptManager:
     def _start_auto_save(self):
         """Auto-save every 30 seconds"""
         self._save_files()
-        self.auto_save_timer = threading.Timer(
+        self.auto_save_timer = threading.Timer(  # type: ignore
             config.AUTO_SAVE_INTERVAL, self._start_auto_save
         )
-        self.auto_save_timer.daemon = True
-        self.auto_save_timer.start()
+        self.auto_save_timer.daemon = True  # type: ignore
+        self.auto_save_timer.start()  # type: ignore
+
+    def clear_session(self):
+        with self.save_lock:
+            self.session_data["transcript"] = []
+            self._save_files()
 
     def stop_session(self):
-        if self.auto_save_timer:
-            self.auto_save_timer.cancel()
+        if self.auto_save_timer:  # type: ignore
+            self.auto_save_timer.cancel()  # type: ignore
         if self.session_start:
             end_time = datetime.now()
-            duration = int((end_time - self.session_start).total_seconds())
-            self.session_data["session"]["end_time"] = end_time.strftime("%H:%M:%S")
-            self.session_data["session"]["duration_seconds"] = duration
+            duration = int((end_time - self.session_start).total_seconds())  # type: ignore
+            self.session_data["session"]["end_time"] = end_time.strftime("%H:%M:%S")  # type: ignore
+            self.session_data["session"]["duration_seconds"] = duration  # type: ignore
         self._save_files()
 
     def _get_filename_base(self):
-        date_str = self.session_start.strftime("%Y-%m-%d") if self.session_start else datetime.now().strftime("%Y-%m-%d")
-        time_str = self.session_start.strftime("%H%M") if self.session_start else datetime.now().strftime("%H%M")
-        return os.path.join(config.TRANSCRIPT_DIR, f"{date_str}_{self.mode}_{time_str}")
+        date_str = self.session_start.strftime("%Y-%m-%d") if self.session_start else datetime.now().strftime("%Y-%m-%d")  # type: ignore
+        time_str = self.session_start.strftime("%H%M") if self.session_start else datetime.now().strftime("%H%M")  # type: ignore
+        return os.path.join(config.TRANSCRIPT_DIR, f"{date_str}_{self.mode}_{time_str}")  # type: ignore
 
     def _save_files(self):
         with self.save_lock:
@@ -91,24 +96,24 @@ class TranscriptManager:
                 "=" * 55,
                 f"  VIVEK AI - SESSION TRANSCRIPT",
                 "=" * 55,
-                f"  Mode    : {s.get('mode', '')}",
-                f"  Engine  : {s.get('engine', '')}",
-                f"  Date    : {s.get('date', '')}",
-                f"  Started : {s.get('start_time', '')}",
+                f"  Mode    : {s.get('mode', '')}",  # type: ignore
+                f"  Engine  : {s.get('engine', '')}",  # type: ignore
+                f"  Date    : {s.get('date', '')}",  # type: ignore
+                f"  Started : {s.get('start_time', '')}",  # type: ignore
                 "=" * 55,
                 ""
             ]
             for entry in self.session_data["transcript"]:
-                lines.append(f"[{entry['timestamp']}] 🎙️  {entry['heard']}")
-                lines.append(f"[{entry['timestamp']}] 🤖  {entry['response']}")
+                lines.append(f"[{entry['timestamp']}] 🎙️  {entry['heard']}")  # type: ignore
+                lines.append(f"[{entry['timestamp']}] 🤖  {entry['response']}")  # type: ignore
                 lines.append("")
 
-            if s.get("end_time"):
-                dur = s.get("duration_seconds", 0)
+            if s.get("end_time"):  # type: ignore
+                dur = s.get("duration_seconds", 0)  # type: ignore
                 mins, secs = divmod(dur, 60)
                 lines += [
                     "=" * 55,
-                    f"  SESSION END : {s['end_time']}  |  Duration: {mins}m {secs}s",
+                    f"  SESSION END : {s['end_time']}  |  Duration: {mins}m {secs}s",  # type: ignore
                     "=" * 55
                 ]
 

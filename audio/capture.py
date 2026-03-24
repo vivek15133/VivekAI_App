@@ -94,7 +94,7 @@ class AudioCapture:
                     audio_to_send = []
                     silence_counter = 0.0
             
-            threading.Event().wait(0.1)
+            threading.Event().wait(0.02)
 
     def _has_voice(self, audio_chunk):
         """Simple energy-based VAD"""

@@ -354,7 +354,7 @@ class VivekAIOverlay(QWidget):
         self.mic_response.setObjectName("responseBox")
         self.mic_response.setPlaceholderText("AI answer appears here...")
         v.addWidget(self.mic_response, 1)
-        v.addLayout(self._action_btns(self.mic_response))
+        v.addLayout(self._action_btns(self.mic_response, self.heard_text))
         return w
 
     # ── Screenshot tab ────────────────────────────────────────────────────────
@@ -592,7 +592,7 @@ class VivekAIOverlay(QWidget):
         )
         return lbl
 
-    def _action_btns(self, textbox):
+    def _action_btns(self, textbox, second_textbox=None):
         row = QHBoxLayout(); row.setSpacing(6)
         c = QPushButton("📋  Copy Answer")
         c.setObjectName("copyBtn")
@@ -601,13 +601,20 @@ class VivekAIOverlay(QWidget):
         d = QPushButton("🗑  Clear")
         d.setObjectName("clearBtn")
         d.setCursor(Qt.PointingHandCursor)
-        d.clicked.connect(textbox.clear)
+        d.clicked.connect(lambda: self._clear_boxes(textbox, second_textbox))
         f = QPushButton("📁  Transcripts")
         f.setObjectName("clearBtn")
         f.setCursor(Qt.PointingHandCursor)
         f.clicked.connect(self._open_transcripts)
         row.addWidget(c); row.addWidget(d); row.addWidget(f)
         return row
+
+    def _clear_boxes(self, box1, box2=None):
+        box1.clear()
+        if box2: box2.clear()
+        # Also reset manager and counter if it's the main mic tab
+        self.transcript_mgr.clear_session()
+        self.count_label.setText("0 answers")
 
     def _icon_btn(self, text, color, callback):
         btn = QPushButton(text)
