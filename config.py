@@ -6,8 +6,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
 
 # â”€â”€ API KEYS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "") or os.getenv("\ufeffGROQ_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "") or os.getenv("\ufeffGEMINI_API_KEY", "")
 
 # â”€â”€ WHISPER SETTINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 WHISPER_MODEL       = "small"
@@ -33,7 +33,7 @@ GROQ_MODEL      = "llama3-8b-8192"
 GROQ_FAST_MODEL = "llama3-8b-8192"
 
 # â”€â”€ GEMINI MODELS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-GEMINI_MODEL = "gemini-1.5-flash-latest"
+GEMINI_MODEL = "gemini-2.0-flash"
 
 # â”€â”€ OLLAMA SETTINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 OLLAMA_MODEL = "llama3.2:3b"
@@ -63,4 +63,4 @@ TESSERACT_PATH = _get_tesseract_path()
 # â”€â”€ UI SETTINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 WINDOW_OPACITY = 0.93
 WINDOW_WIDTH = 360
-WINDOW_HEIGHT  = 600
+WINDOW_HEIGHT  = 400
