@@ -548,8 +548,17 @@ class VivekAIOverlay(QWidget):
         self.quick_ask_btn.setFixedHeight(56)
         self.quick_ask_btn.setCursor(Qt.PointingHandCursor)
         self.quick_ask_btn.clicked.connect(self._quick_ask)
+
+        self.clear_quick_btn = QPushButton("🗑")
+        self.clear_quick_btn.setObjectName("clearBtn")
+        self.clear_quick_btn.setFixedWidth(40)
+        self.clear_quick_btn.setFixedHeight(56)
+        self.clear_quick_btn.setCursor(Qt.PointingHandCursor)
+        self.clear_quick_btn.clicked.connect(self.quick_question.clear)
+
         quick_row.addWidget(self.quick_question, 1)
         quick_row.addWidget(self.quick_ask_btn)
+        quick_row.addWidget(self.clear_quick_btn)
         v.addLayout(quick_row)
 
         self.quick_response = QTextEdit()

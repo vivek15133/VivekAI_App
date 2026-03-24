@@ -65,15 +65,35 @@ class AudioCapture:
         return (None, pyaudio.paContinue)
 
     def _process_buffer(self):
-        frames_needed = int(self.sample_rate * self.chunk_seconds / self.chunk_size)
+        """Dynamic endpointing: capture until silence or max length"""
+        audio_to_send = []
+        silence_counter = 0.0
+        max_silence = getattr(config, 'AUDIO_MAX_SILENCE', 0.5)
+        max_length = getattr(config, 'AUDIO_MAX_LENGTH', 10.0)
+        
         while self.running:
+            chunk_to_process = None
             with self.buffer_lock:
-                if len(self.buffer) >= frames_needed:
-                    chunk = np.concatenate(self.buffer[:frames_needed])  # type: ignore
-                    self.buffer = self.buffer[frames_needed:]  # type: ignore
-                    # Check if there's actual sound (VAD)
-                    if self._has_voice(chunk):
-                        self.callback(chunk, self.sample_rate)
+                if self.buffer:
+                    chunk_to_process = np.concatenate(self.buffer)
+                    self.buffer = []
+            
+            if chunk_to_process is not None:
+                if self._has_voice(chunk_to_process):
+                    audio_to_send.append(chunk_to_process)
+                    silence_counter = 0.0
+                else:
+                    if audio_to_send:
+                        silence_counter += (len(chunk_to_process) / self.sample_rate)  # type: ignore
+                
+                # Check for endpoint or max length
+                current_len = sum(len(c) for c in audio_to_send) / self.sample_rate  # type: ignore
+                if (silence_counter >= max_silence and audio_to_send) or (current_len >= max_length):  # type: ignore
+                    final_chunk = np.concatenate(audio_to_send)
+                    self.callback(final_chunk, self.sample_rate)
+                    audio_to_send = []
+                    silence_counter = 0.0
+            
             threading.Event().wait(0.1)
 
     def _has_voice(self, audio_chunk):
