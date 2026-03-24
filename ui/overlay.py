@@ -206,9 +206,11 @@ class VivekAIOverlay(QWidget):
         layout.addWidget(self._build_statusbar())
 
     def _build_titlebar(self):
-        bar = QFrame()
+        self.titleBar = QFrame()
+        bar = self.titleBar
         bar.setFixedHeight(46)
         bar.setObjectName("titleBar")
+        bar.installEventFilter(self)
         h = QHBoxLayout(bar)
         h.setContentsMargins(14, 0, 10, 0)
         h.setSpacing(8)
@@ -316,6 +318,7 @@ class VivekAIOverlay(QWidget):
         self.listen_btn = QPushButton("▶  Start Mic")
         self.listen_btn.setFixedWidth(100)
         self.listen_btn.setObjectName("listenBtn")
+        self.listen_btn.setCursor(Qt.PointingHandCursor)
         self.listen_btn.clicked.connect(self._toggle_listen)
 
         h.addWidget(self.mode_combo)
@@ -366,6 +369,7 @@ class VivekAIOverlay(QWidget):
         self.screenshot_btn = QPushButton("📸  Capture Screen & Get Answer")
         self.screenshot_btn.setObjectName("screenshotBtn")
         self.screenshot_btn.setFixedHeight(46)
+        self.screenshot_btn.setCursor(Qt.PointingHandCursor)
         self.screenshot_btn.clicked.connect(self._do_screenshot)
         delay_row = QHBoxLayout()
         delay_lbl = QLabel("Capture delay:")
@@ -419,12 +423,15 @@ class VivekAIOverlay(QWidget):
         btn_row = QHBoxLayout(); btn_row.setSpacing(6)
         self.select_region_btn = QPushButton("🖱  Select Region")
         self.select_region_btn.setObjectName("regionBtn")
+        self.select_region_btn.setCursor(Qt.PointingHandCursor)
         self.select_region_btn.clicked.connect(self._select_region)
         self.fullscreen_btn = QPushButton("🖥  Full Screen")
         self.fullscreen_btn.setObjectName("regionBtn")
+        self.fullscreen_btn.setCursor(Qt.PointingHandCursor)
         self.fullscreen_btn.clicked.connect(self._use_fullscreen)
         self.watch_btn = QPushButton("👁  Start Watching")
         self.watch_btn.setObjectName("watchBtn")
+        self.watch_btn.setCursor(Qt.PointingHandCursor)
         self.watch_btn.clicked.connect(self._toggle_watch)
         btn_row.addWidget(self.select_region_btn)
         btn_row.addWidget(self.fullscreen_btn)
@@ -494,10 +501,12 @@ class VivekAIOverlay(QWidget):
         self.upload_btn = QPushButton("📂  Upload Resume")
         self.upload_btn.setObjectName("uploadBtn")
         self.upload_btn.setFixedHeight(40)
+        self.upload_btn.setCursor(Qt.PointingHandCursor)
         self.upload_btn.clicked.connect(self._upload_resume)
         self.clear_resume_btn = QPushButton("🗑  Clear")
         self.clear_resume_btn.setObjectName("clearBtn")
         self.clear_resume_btn.setFixedWidth(70)
+        self.clear_resume_btn.setCursor(Qt.PointingHandCursor)
         self.clear_resume_btn.clicked.connect(self._clear_resume)
         upload_row.addWidget(self.upload_btn); upload_row.addWidget(self.clear_resume_btn)
         v.addLayout(upload_row)
@@ -537,6 +546,7 @@ class VivekAIOverlay(QWidget):
         self.quick_ask_btn.setObjectName("copyBtn")
         self.quick_ask_btn.setFixedWidth(50)
         self.quick_ask_btn.setFixedHeight(56)
+        self.quick_ask_btn.setCursor(Qt.PointingHandCursor)
         self.quick_ask_btn.clicked.connect(self._quick_ask)
         quick_row.addWidget(self.quick_question, 1)
         quick_row.addWidget(self.quick_ask_btn)
@@ -577,12 +587,15 @@ class VivekAIOverlay(QWidget):
         row = QHBoxLayout(); row.setSpacing(6)
         c = QPushButton("📋  Copy Answer")
         c.setObjectName("copyBtn")
+        c.setCursor(Qt.PointingHandCursor)
         c.clicked.connect(lambda: self._copy(textbox))
         d = QPushButton("🗑  Clear")
         d.setObjectName("clearBtn")
+        d.setCursor(Qt.PointingHandCursor)
         d.clicked.connect(textbox.clear)
         f = QPushButton("📁  Transcripts")
         f.setObjectName("clearBtn")
+        f.setCursor(Qt.PointingHandCursor)
         f.clicked.connect(self._open_transcripts)
         row.addWidget(c); row.addWidget(d); row.addWidget(f)
         return row
@@ -590,6 +603,7 @@ class VivekAIOverlay(QWidget):
     def _icon_btn(self, text, color, callback):
         btn = QPushButton(text)
         btn.setFixedSize(26, 26)
+        btn.setCursor(Qt.PointingHandCursor)
         btn.setStyleSheet(
             f"QPushButton{{background:transparent;color:{color};"
             "border:none;font-size:13px;border-radius:5px;}}"
@@ -699,8 +713,9 @@ class VivekAIOverlay(QWidget):
         self.count_label.setText(
             f"{self.transcript_mgr.get_entry_count()} answers"
         )
+        icon = "❌" if engine == "ERROR" else "✅"
         self.status_label.setText(
-            f"✅ {engine} | {elapsed}s | "
+            f"{icon} {engine} | {elapsed}s | "
             f"{'🔴 Listening' if self.is_listening else 'Ready'}"
         )
 
@@ -760,7 +775,8 @@ class VivekAIOverlay(QWidget):
         self.count_label.setText(
             f"{self.transcript_mgr.get_entry_count()} answers"
         )
-        self.status_label.setText(f"✅ {engine} | {elapsed}s")
+        icon = "❌" if engine == "ERROR" else "✅"
+        self.status_label.setText(f"{icon} {engine} | {elapsed}s")
 
     # ── Auto-watch ────────────────────────────────────────────────────────────
 
@@ -916,7 +932,7 @@ class VivekAIOverlay(QWidget):
         quick_signals.response_ready.connect(
             lambda r, e, t: (
                 self.quick_response.setPlainText(r),
-                self.status_label.setText(f"✅ {e} | {t}s"),
+                self.status_label.setText(f"{'❌' if e == 'ERROR' else '✅'} {e} | {t}s"),
             )
         )
         worker = AIWorker(q, prompt, self.ai_engine, quick_signals)
@@ -1024,25 +1040,25 @@ class VivekAIOverlay(QWidget):
     # ── Event filter (container mouse events → resize / cursor) ───────────────
 
     def eventFilter(self, obj, event):
-        if obj is not self.container:
+        if obj not in (self.container, getattr(self, "titleBar", None)):
             return super().eventFilter(obj, event)
 
         etype = event.type()
 
         if etype == QEvent.MouseMove:
-            win_pos = self.container.mapTo(self, event.pos())
+            win_pos = obj.mapTo(self, event.pos())
             if event.buttons() == Qt.LeftButton and self._resize_dir:
                 self._apply_resize(event.globalPos())
                 return True
             elif not (event.buttons() & Qt.LeftButton):
                 result = self._get_resize_dir(win_pos)
                 if result:
-                    self.container.setCursor(QCursor(result[1]))
+                    obj.setCursor(QCursor(result[1]))
                 else:
-                    self.container.unsetCursor()
+                    obj.unsetCursor()
 
         elif etype == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-            win_pos = self.container.mapTo(self, event.pos())
+            win_pos = obj.mapTo(self, event.pos())
             result  = self._get_resize_dir(win_pos)
             if result:
                 self._resize_dir        = result[0]
@@ -1051,6 +1067,7 @@ class VivekAIOverlay(QWidget):
                 return True
 
         elif etype == QEvent.MouseButtonRelease:
+            self._drag_pos = None
             if self._resize_dir:
                 self._resize_dir        = None
                 self._resize_start_geom = None

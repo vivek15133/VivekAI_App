@@ -5,10 +5,10 @@ Auto-fallback if primary engine fails
 """
 
 import time
-import config
-from ai.groq_client import GroqClient
-from ai.gemini_client import GeminiClient
-from ai.ollama_client import OllamaClient
+import config  # type: ignore
+from ai.groq_client import GroqClient  # type: ignore
+from ai.gemini_client import GeminiClient  # type: ignore
+from ai.ollama_client import OllamaClient  # type: ignore
 
 class AIEngine:
     def __init__(self):
@@ -34,20 +34,23 @@ class AIEngine:
             e for e in self.fallback_order if e != self.current_engine
         ]
 
+        last_error = ""
+
         for engine_name in engines_to_try:
             try:
                 start = time.time()
                 response = self._call_engine(engine_name, prompt, system_prompt)
-                elapsed = round(time.time() - start, 2)
+                elapsed = round(time.time() - start, 2)  # type: ignore
 
                 if response:
                     return response, engine_name.upper(), elapsed
 
             except Exception as e:
+                last_error = str(e)
                 print(f"[{engine_name}] failed: {e}, trying next...")
                 continue
 
-        return "Sorry, all AI engines are unavailable right now.", "NONE", 0.0
+        return f"Sorry, all AI engines failed. Last error: {last_error}", "ERROR", 0.0
 
     def _call_engine(self, engine_name, prompt, system_prompt):
         if engine_name == "groq":
