@@ -19,9 +19,9 @@ WHISPER_WORD_TIMESTAMPS = True
 
 # â”€â”€ AUDIO SETTINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 AUDIO_SAMPLE_RATE   = 16000
-AUDIO_CHUNK_SECONDS = 5
+AUDIO_CHUNK_SECONDS = 1
 AUDIO_CHANNELS      = 1
-SILENCE_THRESHOLD   = 0.01
+SILENCE_THRESHOLD   = 0.005
 
 # â”€â”€ AI ENGINE SETTINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 DEFAULT_ENGINE       = "groq"

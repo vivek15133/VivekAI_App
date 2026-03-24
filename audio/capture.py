@@ -30,15 +30,28 @@ class AudioCapture:
     def start(self):
         self.running = True
         device_index = self._get_input_device()
-        self.stream = self.audio.open(
-            format=pyaudio.paFloat32,
-            channels=config.AUDIO_CHANNELS,
-            rate=self.sample_rate,
-            input=True,
-            input_device_index=device_index,
-            frames_per_buffer=self.chunk_size,
-            stream_callback=self._audio_callback
-        )
+        try:
+            self.stream = self.audio.open(
+                format=pyaudio.paFloat32,
+                channels=config.AUDIO_CHANNELS,
+                rate=self.sample_rate,
+                input=True,
+                input_device_index=device_index,
+                frames_per_buffer=self.chunk_size,
+                stream_callback=self._audio_callback
+            )
+        except Exception as e:
+            print(f"[Audio] 16kHz failed, trying 44.1kHz: {e}")
+            self.sample_rate = 44100
+            self.stream = self.audio.open(
+                format=pyaudio.paFloat32,
+                channels=config.AUDIO_CHANNELS,
+                rate=self.sample_rate,
+                input=True,
+                input_device_index=device_index,
+                frames_per_buffer=self.chunk_size,
+                stream_callback=self._audio_callback
+            )
         if self.stream:
             self.stream.start_stream()  # type: ignore
         # Start buffer processor
