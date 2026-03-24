@@ -1,8 +1,9 @@
-﻿import os
+import os
 import platform as _platform
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # type: ignore
 
-load_dotenv()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 # â”€â”€ API KEYS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "")
@@ -28,11 +29,11 @@ MAX_RESPONSE_TOKENS  = 300
 RESPONSE_TIMEOUT     = 5
 
 # â”€â”€ GROQ MODELS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-GROQ_MODEL      = "llama-3.1-8b-instant"
-GROQ_FAST_MODEL = "llama-3.1-8b-instant"
+GROQ_MODEL      = "llama3-8b-8192"
+GROQ_FAST_MODEL = "llama3-8b-8192"
 
 # â”€â”€ GEMINI MODELS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = "gemini-1.5-flash"
 
 # â”€â”€ OLLAMA SETTINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 OLLAMA_MODEL = "llama3.2:3b"

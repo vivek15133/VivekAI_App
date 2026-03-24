@@ -34,7 +34,8 @@ class AIEngine:
             e for e in self.fallback_order if e != self.current_engine
         ]
 
-        last_error = ""
+        from typing import List
+        errors: List[str] = []
 
         for engine_name in engines_to_try:
             try:
@@ -46,11 +47,12 @@ class AIEngine:
                     return response, engine_name.upper(), elapsed
 
             except Exception as e:
-                last_error = str(e)
+                errors.append(f"{engine_name.upper()}: {e}")
                 print(f"[{engine_name}] failed: {e}, trying next...")
                 continue
 
-        return f"Sorry, all AI engines failed. Last error: {last_error}", "ERROR", 0.0
+        err_str = " | ".join(errors)
+        return f"AI engines failed: {err_str}", "ERROR", 0.0
 
     def _call_engine(self, engine_name, prompt, system_prompt):
         if engine_name == "groq":
