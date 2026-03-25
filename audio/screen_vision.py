@@ -39,19 +39,21 @@ class ScreenVision:
 
     # ── FEATURE 1: Single Screenshot ─────────────────────
     def capture_and_read(self, region=None):
-        """
-        Take a screenshot and extract all text from it
-        Returns: (screenshot_image, extracted_text)
-        """
+        """Capture screen/region and return (Image, Text)"""
         try:
-            # Capture screen
+            # 1. Capture
             if region:
                 screenshot = ImageGrab.grab(bbox=region)
             else:
                 screenshot = ImageGrab.grab()
+                # NEW: Automatic Header Cropping for Full Screen
+                # Ignores top ~120px (Address bar, Tab bar) to avoid URL noise
+                w, h = screenshot.size
+                if h > 500: # Only crop if it's a real screen, not a tiny window
+                    screenshot = screenshot.crop((0, 120, w, h))
 
-            # Enhance image for better OCR accuracy
-            enhanced = self._enhance_for_ocr(screenshot)
+            # 2. Enhance for OCR
+            enhanced = self._enhance_image(screenshot)
 
             # Extract text using Tesseract OCR
             text = self._extract_text(enhanced)
@@ -199,16 +201,27 @@ class ScreenVision:
         text = re.sub(r'https?://\S+', '', text)
         text = re.sub(r'www\.\S+', '', text)
         
-        # 2. Block common junk keywords (Browser tabs, social media etc)
+        # 2. Block common junk keywords (Aggressive URL and UI filtering)
         junk_patterns = [
             r'LinkedIn', r'Messaging', r'Gmail', r'CodeSignal', r'Test Instructions',
-            r'app\.', r'\.com', r'\(23\)', r'Your CodeSignal', r'practice-question'
+            r'app\.', r'\.com', r'\(23\)', r'Your CodeSignal', r'practice-question',
+            r'context=', r'invitations', r'questiondatabase', r'status=', r'person_id=',
+            r'request_id=', r'seat_no=', r'#', r'\/practice', r'\?context'
         ]
         for p in junk_patterns:
             text = re.sub(p, '', text, flags=re.IGNORECASE)
 
-        # 3. Remove non-standard special characters (leaving common punct)
-        text = re.sub(r'[^\w\s\?\.\!\,\-\:\(\)]', '', text)
+        # 3. Filter out lines that look like a URL segment (long alphanumeric, no spaces)
+        lines = []
+        for line in text.split('\n'):
+            if not line.strip(): continue
+            if ' ' not in line.strip() and len(line.strip()) > 15: # likely a URL fragment
+                continue
+            lines.append(line)  # type: ignore
+        text = '\n'.join(lines)
+
+        # 4. Remove non-standard special characters (leaving common punct)
+        text = re.sub(r'[^\w\s\?\.\!\,\-\:\(\)]', '', text) # type: ignore[reportGeneralTypeIssues]
 
         # 4. Deduplicate lines and normalize whitespace
         lines = []

@@ -1011,12 +1011,28 @@ class VivekAIOverlay(QWidget):
         self.watch_detected.setPlainText(short)
 
     def _on_vision_response(self, response, engine, elapsed):
+        # NEW: Handle Quota/Error Fallback
+        if "Quota" in response or "429" in response:
+            ocr_text = self.ocr_text.toPlainText()
+            if len(ocr_text) > 20: # If we have decent OCR text, try text-only fallback
+                self.status_label.setText("🔄 Quota full — trying OCR Text fallback...")
+                def _fallback():
+                    fallback_resp = self.vision_client.analyze_ocr_text(
+                        ocr_text, self.mode_combo.currentData()
+                    )
+                    # Emit it through the same channel but marked as fallback
+                    self.signals.vision_ready.emit(
+                        f" (Fallback) {fallback_resp}", "Text-AI", 0.0
+                    )
+                threading.Thread(target=_fallback, daemon=True).start()
+                return
+
         self.global_response.setPlainText(response)
         self.transcript_mgr.add_entry("[Screen]", response)
         self.count_label.setText(
             f"{self.transcript_mgr.get_entry_count()} answers"
         )
-        icon = "❌" if engine == "ERROR" else "✅"
+        icon = "❌" if engine == "ERROR" or "error" in response.lower() else "✅"
         self.status_label.setText(f"{icon} {engine} | {elapsed}s")
 
     # ── Auto-watch ────────────────────────────────────────────────────────────

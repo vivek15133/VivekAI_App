@@ -54,7 +54,16 @@ class VisionAIClient:
             return response.text.strip()
 
         except Exception as e:
-            return f"Vision AI error: {str(e)}"
+            err_msg = str(e)
+            if "429" in err_msg or "Quota" in err_msg:
+                 return (
+                    "⚠️ Vision AI Quota Exceeded (429).\n\n"
+                    "Your Gemini free tier limit has been reached. Please:\n"
+                    "1. Switch to 'Groq' or 'Ollama' in the top dropdown.\n"
+                    "2. Or wait a few minutes before trying again.\n\n"
+                    "Screen content was captured, but analysis is temporarily blocked."
+                 )
+            return f"Vision AI error: {err_msg}"
 
     def analyze_ocr_text(self, text, mode="Interview"):
         """
