@@ -649,6 +649,12 @@ class VivekAIOverlay(QWidget):
         self.global_response.setObjectName("responseBox")
         self.global_response.setPlaceholderText("Everything the AI says will appear here permanently...")
         self.global_response.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        # Initial Premium Font
+        font = QFont(get_font_family())
+        font.setPointSizeF(16.0)
+        self.global_response.setFont(font)
+        
         v.addWidget(self.global_response, 1)
 
         # Action Buttons
@@ -754,7 +760,6 @@ class VivekAIOverlay(QWidget):
                 background: #000000;
                 color: #FFFFFF;
                 border: 2px solid {accent};
-                font-size: {large}px;
             }}
             
             QLabel {{ color: #E5E7EB; font-family: 'Segoe UI'; font-weight: 600; }}
@@ -949,6 +954,7 @@ class VivekAIOverlay(QWidget):
 
     def _on_mic_response(self, response, engine, elapsed):
         self.global_response.setPlainText(response)
+        self._auto_scale_font(self.global_response)
         self.transcript_mgr.add_entry(
             self.heard_text.toPlainText(), response
         )
@@ -1028,6 +1034,7 @@ class VivekAIOverlay(QWidget):
                 return
 
         self.global_response.setPlainText(response)
+        self._auto_scale_font(self.global_response)
         self.transcript_mgr.add_entry("[Screen]", response)
         self.count_label.setText(
             f"{self.transcript_mgr.get_entry_count()} answers"
@@ -1189,6 +1196,7 @@ class VivekAIOverlay(QWidget):
         quick_signals.response_ready.connect(
             lambda r, e, t: (
                 self.global_response.setPlainText(r),
+                self._auto_scale_font(self.global_response),
                 self.status_label.setText(f"{'❌' if e == 'ERROR' else '✅'} {e} | {t}s"),
             )
         )
@@ -1350,3 +1358,33 @@ class VivekAIOverlay(QWidget):
         if self.is_listening: self._stop_listening()
         if self.is_watching:  self._stop_watching()
         e.accept()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if hasattr(self, 'global_response') and self.global_response.toPlainText():
+            self._auto_scale_font(self.global_response)
+
+    def _auto_scale_font(self, text_edit):
+        """Iteratively shrink font to fit the viewport vertically"""
+        size = 16.0
+        family = get_font_family()
+        
+        # Initial set
+        font = QFont(family)
+        font.setPointSizeF(size)
+        text_edit.setFont(font)
+        
+        QApplication.processEvents()
+        min_size = 8.5
+        
+        while size > min_size:
+            doc_height = text_edit.document().size().height()
+            view_height = text_edit.viewport().height()
+            
+            if doc_height <= view_height:
+                break
+                
+            size -= 0.5
+            font.setPointSizeF(size)
+            text_edit.setFont(font)
+            QApplication.processEvents()
