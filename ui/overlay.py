@@ -398,7 +398,16 @@ class VivekAIOverlay(QWidget):
     def _build_mic_tab(self):
         w = QWidget(); v = QVBoxLayout(w)
         v.setContentsMargins(12, 10, 12, 8); v.setSpacing(8)
-        v.addWidget(self._slabel("🎙  HEARD", "#00E5FF"))
+        header_row = QHBoxLayout()
+        header_row.addWidget(self._slabel("🎙  HEARD", "#00E5FF"))
+        header_row.addStretch()
+        clear_heard = QPushButton("🗑")
+        clear_heard.setObjectName("clearBtn")
+        clear_heard.setFixedSize(30, 20)
+        clear_heard.clicked.connect(lambda: self.heard_text.clear())
+        header_row.addWidget(clear_heard)
+        v.addLayout(header_row)
+
         self.heard_text = QTextEdit()
         self.heard_text.setReadOnly(True)
         self.heard_text.setFixedHeight(120)
@@ -435,7 +444,17 @@ class VivekAIOverlay(QWidget):
         delay_row.addWidget(delay_lbl); delay_row.addWidget(self.delay_combo)
         delay_row.addStretch()
         v.addWidget(self.screenshot_btn); v.addLayout(delay_row)
-        v.addWidget(self._slabel("👁  SCREEN TEXT", "#FFD700"))
+        # Screen text header + Clear button
+        header_row = QHBoxLayout()
+        header_row.addWidget(self._slabel("👁  SCREEN TEXT", "#FFD700"))
+        header_row.addStretch()
+        clear_ocr = QPushButton("🗑")
+        clear_ocr.setObjectName("clearBtn")
+        clear_ocr.setFixedSize(30, 20)
+        clear_ocr.clicked.connect(lambda: self.ocr_text.clear())
+        header_row.addWidget(clear_ocr)
+        v.addLayout(header_row)
+
         self.ocr_text = QTextEdit()
         self.ocr_text.setReadOnly(True)
         self.ocr_text.setFixedHeight(120)
@@ -502,7 +521,17 @@ class VivekAIOverlay(QWidget):
         v.addLayout(int_row)
 
         # Detected content (reduced height in input side)
-        v.addWidget(self._slabel("👁  DETECTED ON SCREEN", "#FFD700"))
+        # Detected content header + Clear button
+        det_row = QHBoxLayout()
+        det_row.addWidget(self._slabel("👁  DETECTED ON SCREEN", "#FFD700"))
+        det_row.addStretch()
+        clear_det = QPushButton("🗑")
+        clear_det.setObjectName("clearBtn")
+        clear_det.setFixedSize(30, 20)
+        clear_det.clicked.connect(lambda: self.watch_detected.clear())
+        det_row.addWidget(clear_det)
+        v.addLayout(det_row)
+
         self.watch_detected = QTextEdit()
         self.watch_detected.setReadOnly(True)
         self.watch_detected.setFixedHeight(120)
@@ -647,8 +676,9 @@ class VivekAIOverlay(QWidget):
 
     def _clear_everything(self):
         self.global_response.clear()
-        # Also clear inputs if visible
         if hasattr(self, 'heard_text'): self.heard_text.clear()
+        if hasattr(self, 'ocr_text'): self.ocr_text.clear()
+        if hasattr(self, 'watch_detected'): self.watch_detected.clear()
         if hasattr(self, 'quick_question'): self.quick_question.clear()
         self.transcript_mgr.clear_session()
         self.status_label.setText("✨ Ready")
