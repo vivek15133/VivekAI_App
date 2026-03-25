@@ -675,13 +675,28 @@ class VivekAIOverlay(QWidget):
         return w
 
     def _clear_everything(self):
+        # 1. Stop and remove all active workers to prevent ghost responses
+        for w in self.workers[:]:  # type: ignore
+            try:
+                if hasattr(w, 'terminate'): 
+                    w.terminate()  # type: ignore
+                if w in self.workers: self.workers.remove(w)
+            except: pass
+        
+        # 2. Clear UI components
         self.global_response.clear()
         if hasattr(self, 'heard_text'): self.heard_text.clear()
         if hasattr(self, 'ocr_text'): self.ocr_text.clear()
         if hasattr(self, 'watch_detected'): self.watch_detected.clear()
         if hasattr(self, 'quick_question'): self.quick_question.clear()
-        self.transcript_mgr.clear_session()
-        self.status_label.setText("✨ Ready")
+        
+        # 3. Reset persistent storage and stats
+        try:
+            self.transcript_mgr.clear_session()
+        except:
+            pass
+            
+        self.status_label.setText("✨ Session Cleared")
         self.count_label.setText("0 answers")
 
     # ── Status bar ────────────────────────────────────────────────────────────

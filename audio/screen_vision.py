@@ -179,11 +179,81 @@ class ScreenVision:
             # Clean up text
             lines = [line.strip() for line in text.split('\n') if line.strip()]
             cleaned = '\n'.join(lines)
-            return cleaned
+            
+            # Application of Intelligence Filter
+            final_text = self._process_intelligence(cleaned)
+            return final_text
 
         except Exception as e:
             print(f"OCR error: {e}")
             return ""
+
+    def _process_intelligence(self, text):
+        """
+        Premium cleanup: Removes browser noise, URLs, and isolates the 'Ask'.
+        """
+        import re
+        if not text: return ""
+
+        # 1. Strip URLs and browser artifacts
+        text = re.sub(r'https?://\S+', '', text)
+        text = re.sub(r'www\.\S+', '', text)
+        
+        # 2. Block common junk keywords (Browser tabs, social media etc)
+        junk_patterns = [
+            r'LinkedIn', r'Messaging', r'Gmail', r'CodeSignal', r'Test Instructions',
+            r'app\.', r'\.com', r'\(23\)', r'Your CodeSignal', r'practice-question'
+        ]
+        for p in junk_patterns:
+            text = re.sub(p, '', text, flags=re.IGNORECASE)
+
+        # 3. Remove non-standard special characters (leaving common punct)
+        text = re.sub(r'[^\w\s\?\.\!\,\-\:\(\)]', '', text)
+
+        # 4. Deduplicate lines and normalize whitespace
+        lines = []
+        seen = set()
+        for line in text.split('\n'):
+            clean_line = line.strip()
+            if not clean_line or len(clean_line) < 3: continue
+            
+            # Simple fuzzy deduplication
+            normalized = re.sub(r'\s+', '', clean_line.lower())
+            if normalized not in seen:
+                lines.append(clean_line)  # type: ignore
+                seen.add(normalized)
+        
+        cleaned_text = '\n'.join(lines)
+
+        # 5. Find the "Ask" (Intelligent Isolate)
+        return self._find_the_ask(cleaned_text)
+
+    def _find_the_ask(self, text):
+        """
+        Heuristic to find the actual question block.
+        """
+        if not text: return ""
+        lines = text.split('\n')
+        
+        # Priority: Lines ending in '?'
+        questions = [l for l in lines if '?' in l]
+        if questions:
+            # Join all questions if they are short, or return the most substantial one
+            return ' '.join(questions)
+
+        # Fallback: Look for question keywords at start of lines
+        kw = ["what", "how", "why", "which", "can", "is", "explain", "write", "solve"]
+        maybe_ask = []
+        for l in lines:
+            first_word = l.split()[0].lower() if l.split() else ""
+            if first_word in kw:
+                maybe_ask.append(l)
+        
+        if maybe_ask:
+            return '\n'.join(maybe_ask)
+
+        # If no clear question, return the whole thing but limited to 3 main lines
+        return '\n'.join(lines[:5])
 
     def get_screen_size(self):
         """Get current screen dimensions"""

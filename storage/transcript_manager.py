@@ -19,7 +19,7 @@ class TranscriptManager:
         self.session_start = None
         self.mode = "General"
         self.engine = "Groq"
-        self.save_lock = threading.Lock()
+        self.save_lock = threading.RLock()
         self.auto_save_timer = None
         self._ensure_dir()
 
