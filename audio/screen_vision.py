@@ -53,7 +53,7 @@ class ScreenVision:
                     screenshot = screenshot.crop((0, 120, w, h))
 
             # 2. Enhance for OCR
-            enhanced = self._enhance_image(screenshot)
+            enhanced = self._enhance_for_ocr(screenshot)
 
             # Extract text using Tesseract OCR
             text = self._extract_text(enhanced)
@@ -135,8 +135,8 @@ class ScreenVision:
         new_words = set(new_text.lower().split())
         new_unique = new_words - old_words
 
-        # Trigger if more than 5 new unique words appeared
-        return len(new_unique) > 5
+        # Trigger if more than 2 new unique words appeared
+        return len(new_unique) > 2
 
     # ── OCR Processing ────────────────────────────────────
     def _enhance_for_ocr(self, image):
@@ -254,19 +254,34 @@ class ScreenVision:
             # Join all questions if they are short, or return the most substantial one
             return ' '.join(questions)
 
-        # Fallback: Look for question keywords at start of lines
-        kw = ["what", "how", "why", "which", "can", "is", "explain", "write", "solve"]
+        # Fallback 1: Look for question/instruction keywords at start of lines
+        kw = [
+            "what", "how", "why", "which", "can", "is", "explain", "write", "solve",
+            "you", "given", "find", "identify", "create", "implement", "calculate"
+        ]
         maybe_ask = []
         for l in lines:
-            first_word = l.split()[0].lower() if l.split() else ""
+            words = l.split()
+            if not words: continue
+            first_word = words[0].lower().replace(':', '')
             if first_word in kw:
                 maybe_ask.append(l)
         
         if maybe_ask:
-            return '\n'.join(maybe_ask)
+            # Return up to 8 lines to catch the full instruction block
+            return '\n'.join(maybe_ask[:8])  # type: ignore
 
-        # If no clear question, return the whole thing but limited to 3 main lines
-        return '\n'.join(lines[:5])
+        # Fallback 2: Look for technical context
+        tech_kw = ["table", "column", "function", "array", "string", "integers", "return"]
+        for l in lines:
+            if any(tk in l.lower() for tk in tech_kw):
+                maybe_ask.append(l)
+        
+        if maybe_ask:
+            return '\n'.join(maybe_ask[:8])  # type: ignore
+
+        # Ultimate Fallback: Return the first 8 lines of cleaned text
+        return '\n'.join(lines[:8])  # type: ignore
 
     def get_screen_size(self):
         """Get current screen dimensions"""
